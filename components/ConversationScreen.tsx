@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Agent, Message, MonitorScore, Service } from '../types';
-import { getMonitorDecision, getAgentResponse } from '../services/geminiService';
+import { getMonitorDecision, getAgentResponse } from '../services/openaiService';
 import { UserIcon, SendIcon, FileExportIcon } from './icons';
 
 interface ConversationScreenProps {
