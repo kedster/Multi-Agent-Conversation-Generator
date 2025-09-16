@@ -1,0 +1,5 @@
+{
+  "name": "Multi-Agent Conversation Generator",
+  "description": "An application that simulates conversations between multiple AI agents on a selected topic, allowing user interaction and exporting the final transcript as HTML or PDF.",
+  "requestFramePermissions": []
+}
