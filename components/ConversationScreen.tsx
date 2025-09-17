@@ -16,6 +16,7 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
   const [userInput, setUserInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('Your turn. Start the conversation!');
+  const [agentsPerTurn, setAgentsPerTurn] = useState<number>(2); // New: configurable agents per turn
   const [cumulativeScores, setCumulativeScores] = useState<Record<string, MonitorScore>>(() =>
     Object.fromEntries(
       agents.map(agent => [agent.id, { agentId: agent.id, relevance: 0, context: 0 }])
@@ -52,49 +53,47 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
     setIsLoading(true);
 
     try {
-        let agent1Id: string | undefined;
-        let agent2Id: string | undefined;
+        let speakingAgents: string[] = [];
         let turnScores: MonitorScore[] = [];
 
         // 1. "Fair Turn" Logic: Check if any agent must speak
-        const forcedAgentId = agents.find(a => skippedTurns[a.id] >= 2)?.id;
+        const forcedAgentIds = agents.filter(a => skippedTurns[a.id] >= 2).map(a => a.id);
 
-        if (forcedAgentId) {
-            agent1Id = forcedAgentId;
-            const agent1 = agents.find(a => a.id === agent1Id);
-            setStatusMessage(`Monitor is giving ${agent1?.name} a chance to speak...`);
-            // Monitor decides the *second* speaker
-            const monitorDecision = await getNextSpeaker(conversationAfterUser, agents, userName);
-             if (!monitorDecision || !monitorDecision.nextSpeakerAgentId || !monitorDecision.scores) {
-                throw new Error("Invalid response from monitor agent.");
-            }
-            agent2Id = monitorDecision.nextSpeakerAgentId;
-            turnScores = monitorDecision.scores;
-        } else {
-            // 2. Normal Logic: Monitor decides both speakers
-            setStatusMessage('Monitor is analyzing the conversation...');
+        if (forcedAgentIds.length > 0) {
+            // Include all agents that need to speak due to fair turn logic
+            speakingAgents = [...forcedAgentIds];
+            setStatusMessage(`Monitor is giving ${forcedAgentIds.map(id => agents.find(a => a.id === id)?.name).join(', ')} a chance to speak...`);
+        }
+
+        // 2. Fill remaining slots with monitor-selected agents
+        const remainingSlots = Math.max(0, agentsPerTurn - speakingAgents.length);
+        if (remainingSlots > 0) {
             const monitorDecision = await getNextSpeaker(conversationAfterUser, agents, userName);
             if (!monitorDecision || !monitorDecision.nextSpeakerAgentId || !monitorDecision.scores) {
                 throw new Error("Invalid response from monitor agent.");
             }
-            agent1Id = monitorDecision.nextSpeakerAgentId;
-            agent2Id = monitorDecision.scores
-                .filter(s => s.agentId !== agent1Id)
-                .sort((a, b) => (b.relevance + b.context) - (a.relevance + a.context))[0]?.agentId;
+            
             turnScores = monitorDecision.scores;
+            
+            // Select additional agents based on scores, avoiding duplicates
+            const availableAgents = monitorDecision.scores
+                .filter(s => !speakingAgents.includes(s.agentId))
+                .sort((a, b) => (b.relevance + b.context) - (a.relevance + a.context))
+                .slice(0, remainingSlots)
+                .map(s => s.agentId);
+            
+            speakingAgents = [...speakingAgents, ...availableAgents];
+        } else {
+            // If all slots filled by forced agents, still get scores for tracking
+            const monitorDecision = await getNextSpeaker(conversationAfterUser, agents, userName);
+            if (monitorDecision && monitorDecision.scores) {
+                turnScores = monitorDecision.scores;
+            }
         }
 
-      if (!agent1Id || !agent2Id) {
-          throw new Error("Could not determine agents to speak.");
-      }
-      
-      const agent1 = agents.find(a => a.id === agent1Id);
-      const agent2 = agents.find(a => a.id === agent2Id);
-
-      if (!agent1 || !agent2) {
-          throw new Error("Invalid agent selected by the monitor.");
-      }
-
+        if (speakingAgents.length === 0) {
+            throw new Error("Could not determine agents to speak.");
+        }
       // 3. Update scores and turn counters
       setCumulativeScores(prevScores => {
         const newScores = { ...prevScores };
@@ -113,7 +112,7 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
       setSkippedTurns(prevSkipped => {
           const newSkipped = { ...prevSkipped };
           agents.forEach(agent => {
-              if (agent.id === agent1Id || agent.id === agent2Id) {
+              if (speakingAgents.includes(agent.id)) {
                   newSkipped[agent.id] = 0;
               } else {
                   newSkipped[agent.id]++;
@@ -122,27 +121,32 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
           return newSkipped;
       });
 
-
-      // 4. First agent generates a response
-      setNextAgentId(agent1Id);
-      setStatusMessage(`${agent1.name} is thinking...`);
-      const response1Text = await getAgentResponse(conversationAfterUser, agents, agent1Id, userName);
+      // 4. Generate responses from all speaking agents
+      let currentConversation = conversationAfterUser;
       
-      const agent1Message: Message = {
-        agentId: agent1.id, agentName: agent1.name, text: response1Text, color: agent1.color,
-      };
-      const conversationAfterAgent1 = [...conversationAfterUser, agent1Message];
-      setConversation(conversationAfterAgent1);
-
-      // 5. Second agent generates a response
-      setNextAgentId(agent2Id);
-      setStatusMessage(`${agent2.name} is thinking...`);
-      const response2Text = await getAgentResponse(conversationAfterAgent1, agents, agent2Id, userName);
-
-       const agent2Message: Message = {
-        agentId: agent2.id, agentName: agent2.name, text: response2Text, color: agent2.color,
-      };
-      setConversation(prev => [...prev, agent2Message]);
+      for (let i = 0; i < speakingAgents.length; i++) {
+        const agentId = speakingAgents[i];
+        const agent = agents.find(a => a.id === agentId);
+        
+        if (!agent) {
+          throw new Error(`Invalid agent selected: ${agentId}`);
+        }
+        
+        setNextAgentId(agentId);
+        setStatusMessage(`${agent.name} is thinking...`);
+        
+        const responseText = await getAgentResponse(currentConversation, agents, agentId, userName);
+        
+        const agentMessage: Message = {
+          agentId: agent.id, 
+          agentName: agent.name, 
+          text: responseText, 
+          color: agent.color,
+        };
+        
+        currentConversation = [...currentConversation, agentMessage];
+        setConversation(currentConversation);
+      }
 
     } catch (error) {
       const errorMessage: Message = {
@@ -212,6 +216,31 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
             </button>
           </div>
         </div>
+        
+        <div>
+          <h3 className="text-lg font-bold mb-3">Conversation Settings</h3>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-2">Agents per Turn</label>
+              <select 
+                value={agentsPerTurn} 
+                onChange={(e) => setAgentsPerTurn(Number(e.target.value))}
+                className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                disabled={isLoading}
+              >
+                <option value={2}>2 agents (Focused)</option>
+                <option value={3}>3 agents (Balanced)</option>
+                <option value={4}>4 agents (All participate)</option>
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                {agentsPerTurn === 2 && "Classic mode: 2 agents respond per turn"}
+                {agentsPerTurn === 3 && "Most agents participate each turn"}
+                {agentsPerTurn === 4 && "All agents respond every turn"}
+              </p>
+            </div>
+          </div>
+        </div>
+        
         <div>
             <h3 className="text-lg font-bold mb-3">Status</h3>
             <div className="bg-gray-900 p-3 rounded-lg">
