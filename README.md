@@ -86,9 +86,25 @@ npm run preview
 
 ## 🚀 Deployment
 
-### Cloudflare Pages (Recommended)
+### Cloudflare Workers (Backend API)
 
-This application is optimized for deployment on Cloudflare Pages with Workers for secure API handling.
+Deploy just the API backend as a Cloudflare Worker for maximum performance and global distribution.
+
+**Quick Deploy:**
+```bash
+npm run deploy:worker
+```
+
+**Configuration:**
+- Build command: `npm run build:worker`
+- Deploy command: `npx wrangler deploy`
+- Root directory: `/`
+
+For detailed instructions, see [CLOUDFLARE_WORKER_DEPLOYMENT.md](./CLOUDFLARE_WORKER_DEPLOYMENT.md) and [CLOUDFLARE_BUILD_CONFIG.md](./CLOUDFLARE_BUILD_CONFIG.md).
+
+### Cloudflare Pages (Full Application)
+
+Deploy the complete React frontend with integrated API using Cloudflare Pages.
 
 **Quick Deploy:**
 ```bash
