@@ -1,5 +1,5 @@
-// Health check endpoint for Cloudflare Functions
-export async function onRequestGet() {
+// Health check endpoint for Cloudflare Pages Functions
+export async function onRequestGet(): Promise<Response> {
   return new Response(JSON.stringify({
     status: 'healthy',
     timestamp: new Date().toISOString(),

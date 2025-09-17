@@ -1,19 +1,20 @@
+# Cloudflare Pages project configuration
+# This project uses Cloudflare Pages with Functions, not standalone Workers
+# Deploy via Cloudflare Pages dashboard or 'wrangler pages publish'
+
 name = "multi-agent-conversation-generator"
-main = "functions/index.ts"
+pages_build_output_dir = "dist"
 compatibility_date = "2024-01-01"
 
+# Build configuration for Cloudflare Pages
 [build]
 command = "npm run build"
-destination = "dist"
 
-[vars]
-ENVIRONMENT = "production"
+# Environment configurations for different stages
+[env.production]
+name = "multi-agent-conversation-generator"
 
-# Environment variables will be set in the Cloudflare dashboard
-# OPENAI_API_KEY = "your-key-here"  # Set this in the dashboard
-
-[[env.staging]]
+[env.staging] 
 name = "multi-agent-conversation-generator-staging"
 
-[[env.production]]
-name = "multi-agent-conversation-generator"
+# Note: Environment variables like OPENAI_API_KEY should be set in the Cloudflare Pages dashboard

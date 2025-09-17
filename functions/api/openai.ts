@@ -3,7 +3,13 @@ interface Env {
   OPENAI_API_KEY: string;
 }
 
-export async function onRequestPost(context: { request: Request; env: Env }) {
+interface PagesContext {
+  request: Request;
+  env: Env;
+  params: Record<string, string>;
+}
+
+export async function onRequestPost(context: PagesContext): Promise<Response> {
   const { request, env } = context;
 
   // Handle CORS preflight

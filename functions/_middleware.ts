@@ -1,5 +1,14 @@
 // Cloudflare Pages Functions middleware
-export async function onRequest(context: any) {
+// This middleware adds CORS headers to all requests
+
+interface PagesContext {
+  request: Request;
+  env: Record<string, any>;
+  params: Record<string, string>;
+  next: () => Promise<Response>;
+}
+
+export async function onRequest(context: PagesContext): Promise<Response> {
   // Add CORS headers for all requests
   const response = await context.next();
   
