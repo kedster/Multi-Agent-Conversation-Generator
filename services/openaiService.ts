@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import OpenAI from 'openai';
 import type { Agent, Message, MonitorScore, Service } from '../types';
 
 if (!process.env.API_KEY) {
@@ -7,8 +7,13 @@ if (!process.env.API_KEY) {
   throw new Error("API_KEY environment variable not set.");
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-const model = 'gemini-2.5-flash';
+const openai = new OpenAI({ 
+  apiKey: process.env.API_KEY,
+  dangerouslyAllowBrowser: true // Allow browser usage for client-side apps
+});
+
+// Using gpt-4o-mini as it's the cheapest model that supports JSON mode
+const model = 'gpt-4o-mini';
 
 function formatConversationHistory(conversation: Message[], userName: string): string {
     if (conversation.length === 0) return "The conversation has not started yet.";
@@ -31,33 +36,39 @@ interface MonitorDecision {
     nextSpeakerAgentId: string;
 }
 
+// JSON Schema for OpenAI function calling
 const monitorDecisionSchema = {
-    type: Type.OBJECT,
+    type: "object",
     properties: {
         scores: {
-            type: Type.ARRAY,
+            type: "array",
             items: {
-                type: Type.OBJECT,
+                type: "object",
                 properties: {
-                    agentId: { type: Type.STRING },
-                    relevance: { type: Type.NUMBER, description: "Score from 1-10 on how relevant this agent's contribution would be." },
-                    context: { type: Type.NUMBER, description: "Score from 1-10 on how well this agent can carry the current context forward." },
+                    agentId: { type: "string" },
+                    relevance: { 
+                        type: "number", 
+                        description: "Score from 1-10 on how relevant this agent's contribution would be." 
+                    },
+                    context: { 
+                        type: "number", 
+                        description: "Score from 1-10 on how well this agent can carry the current context forward." 
+                    },
                 },
                 required: ["agentId", "relevance", "context"],
             },
         },
         reasoning: {
-            type: Type.STRING,
+            type: "string",
             description: "A brief explanation for why the next speaker was chosen.",
         },
         nextSpeakerAgentId: {
-            type: Type.STRING,
+            type: "string",
             description: "The ID of the agent that should speak next.",
         },
     },
     required: ["scores", "reasoning", "nextSpeakerAgentId"],
 };
-
 
 export const getMonitorDecision = async (
     conversation: Message[], 
@@ -92,16 +103,27 @@ Based on the history and agent roles, evaluate each agent's potential contributi
 `;
 
     try {
-        const response = await ai.models.generateContent({
+        const response = await openai.chat.completions.create({
             model,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: monitorDecisionSchema,
-            },
+            messages: [
+                {
+                    role: "system",
+                    content: "You are a helpful assistant that always responds with valid JSON according to the provided schema."
+                },
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.7,
         });
 
-        const jsonText = response.text;
+        const jsonText = response.choices[0].message.content;
+        if (!jsonText) {
+            throw new Error("No response content received from OpenAI");
+        }
+        
         return JSON.parse(jsonText) as MonitorDecision;
     } catch (error) {
         console.error("Error getting monitor decision:", error);
@@ -137,15 +159,28 @@ It is now your turn to speak. As ${agent.name}, continue the conversation natura
 `;
 
     try {
-        const response = await ai.models.generateContent({
+        const response = await openai.chat.completions.create({
             model,
-            contents: prompt,
-            config: { 
-                thinkingConfig: { thinkingBudget: 0 } 
-            }
+            messages: [
+                {
+                    role: "system",
+                    content: `You are role-playing as ${agent.name}. ${agent.role}`
+                },
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ],
+            temperature: 0.8,
+            max_tokens: 500,
         });
         
-        return response.text.trim();
+        const content = response.choices[0].message.content;
+        if (!content) {
+            throw new Error("No response content received from OpenAI");
+        }
+        
+        return content.trim();
     } catch (error) {
         console.error(`Error getting response for agent ${agent.name}:`, error);
         throw new Error(`Agent ${agent.name} failed to generate a response.`);
@@ -243,11 +278,28 @@ export const generateExportReport = async (conversation: Message[], service: Ser
     const prompt = getExportReportPrompt(conversationHistory, service, userName);
 
     try {
-        const response = await ai.models.generateContent({
+        const response = await openai.chat.completions.create({
             model,
-            contents: prompt,
+            messages: [
+                {
+                    role: "system",
+                    content: "You are an expert executive assistant. Generate clean, professional HTML reports."
+                },
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ],
+            temperature: 0.3,
+            max_tokens: 2000,
         });
-        return response.text.trim();
+        
+        const content = response.choices[0].message.content;
+        if (!content) {
+            throw new Error("No response content received from OpenAI");
+        }
+        
+        return content.trim();
     } catch (error) {
         console.error("Error generating export report:", error);
         throw new Error("The AI failed to generate a report from the conversation.");
