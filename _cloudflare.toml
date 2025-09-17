@@ -20,11 +20,12 @@
   # Node.js compatibility date
   node_compat = true
 
-# Redirect rules for SPA
+# Redirect rules for SPA (exclude API routes)
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+  force = false
 
 # Headers for security and performance
 [[headers]]

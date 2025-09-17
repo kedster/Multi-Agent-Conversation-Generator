@@ -1,9 +1,33 @@
 import type { Agent, Message, MonitorScore, Service } from '../types';
 
 // Configuration for API endpoint
-const API_BASE_URL = typeof window !== 'undefined' 
-  ? window.location.origin  // Use current domain in browser
-  : 'http://localhost:5173'; // Fallback for development
+// First, try to get the Worker URL from environment variables
+// Then fall back to the current domain (for Pages Functions)
+// Finally, use localhost for development
+const getApiBaseUrl = () => {
+  if (typeof window === 'undefined') {
+    return 'http://localhost:5173'; // Development fallback
+  }
+  
+  // Check if we have a specific worker URL configured
+  const workerUrl = import.meta.env.VITE_WORKER_URL;
+  if (workerUrl) {
+    return workerUrl;
+  }
+  
+  // Check if we're running on Pages and should use the worker subdomain
+  if (window.location.hostname.includes('.pages.dev')) {
+    // Default worker naming convention: if pages is "app-name.pages.dev", 
+    // worker might be "multicahtbackend.your-subdomain.workers.dev"
+    // For now, fall back to using Pages Functions on the same domain
+    return window.location.origin;
+  }
+  
+  // Use current domain (works for both localhost and Pages Functions)
+  return window.location.origin;
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 // Using gpt-4o-mini as it's the cheapest model that supports JSON mode
 const model = 'gpt-4o-mini';
