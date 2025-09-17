@@ -241,9 +241,10 @@ ${formattedHistory}
 Generate the HTML report based on the specific instructions for the theme "${service.name}" below.
 `;
 
+    let prompt: string;
     switch(service.id) {
         case 'dev':
-            return `${commonInstructions}
+            prompt = `${commonInstructions}
             **Theme: Software Development Meeting Report**
             - **Format:** Formal Meeting Minutes.
             - **Main Title:** "Meeting Minutes: ${service.name}"
@@ -254,8 +255,9 @@ Generate the HTML report based on the specific instructions for the theme "${ser
                 4.  "<h3>Decision & Rationale</h3>" (Clearly state the final decision that was reached).
                 5.  "<h3>Action Items</h3>" (Create a bulleted list of concrete next steps, assigning ownership to roles, e.g., "Backend Team: ...").
             `;
+            break;
         case 'mkt':
-            return `${commonInstructions}
+            prompt = `${commonInstructions}
             **Theme: Marketing Campaign Brief**
             - **Format:** A concise, vibrant, and actionable campaign brief.
             - **Main Title:** "Campaign Brief: ${service.name}"
@@ -266,8 +268,9 @@ Generate the HTML report based on the specific instructions for the theme "${ser
                 4.  "<h3>Key Initiatives</h3>" (Bulleted list of the main activities, e.g., 'Pillar Content Page Creation', 'Paid Social Video Campaign', 'Community Engagement Program').
                 5.  "<h3>Success Metrics</h3>" (List the agreed-upon KPIs, e.g., 'LTV:CAC Ratio', 'Cost-Per-Acquisition Target').
             `;
+            break;
         case 'bio':
-            return `${commonInstructions}
+            prompt = `${commonInstructions}
             **Theme: Editorial Direction Memo**
             - **Format:** A formal memo from a senior editor to the writing team.
             - **Main Title:** "Editorial Memo: Direction for '${service.name}'"
@@ -277,8 +280,9 @@ Generate the HTML report based on the specific instructions for the theme "${ser
                 3.  "<h3>Editorial Decision & Guiding Principles</h3>" (State the final direction for the book's chapter. It should be a synthesis of the discussion, providing clear guidance on tone, structure, and priorities).
                 4.  "<h3>Next Steps for the Writing Team</h3>" (Provide a clear, bulleted list of tasks).
             `;
+            break;
         case 'party':
-            return `${commonInstructions}
+            prompt = `${commonInstructions}
             **Theme: Professional Event Plan**
             - **Format:** A structured event planning document.
             - **Main Title:** "Event Plan: ${service.name}"
@@ -288,8 +292,9 @@ Generate the HTML report based on the specific instructions for the theme "${ser
                 3.  "<h3>Guest Experience Flow</h3>" (Describe the intended journey for a guest from arrival to departure).
                 4.  "<h3>Resource Allocation & Responsibilities</h3>" (Use a list to assign key tasks to functional areas, e.g., 'Catering Lead', 'Entertainment Coordinator', 'Decor Lead').
             `;
+            break;
         case 'adv':
-            return `${commonInstructions}
+            prompt = `${commonInstructions}
             **Theme: D&D Campaign Primer**
             - **Format:** A "Session Zero" document for players to read before the campaign starts.
             - **Main Title:** "Campaign Primer: ${service.name}"
@@ -299,8 +304,9 @@ Generate the HTML report based on the specific instructions for the theme "${ser
                 3.  "<h3>House Rules & Character Guidelines</h3>" (Summarize any agreed-upon modifications to gameplay and character creation constraints).
                 4.  "<h3>Session Plan & Expectations</h3>" (Outline the campaign's structure and what players can expect in terms of tone, frequency, and style).
             `;
+            break;
         default:
-            return `${commonInstructions}
+            prompt = `${commonInstructions}
             **Theme: Meeting Summary**
             - **Format:** Professional meeting summary
             - **Main Title:** "Summary: ${service.name}"
@@ -310,9 +316,8 @@ Generate the HTML report based on the specific instructions for the theme "${ser
                 3.  "<h3>Decisions Made</h3>" (Detail any conclusions or decisions reached).
                 4.  "<h3>Next Steps</h3>" (List any action items or follow-up tasks).
             `;
+            break;
     }
-
-    const prompt = getExportPrompt();
     
     try {
         const response = await callOpenAI([
@@ -335,11 +340,5 @@ Generate the HTML report based on the specific instructions for the theme "${ser
     } catch (error) {
         console.error("Error generating export report:", error);
         throw new Error("The AI failed to generate a report from the conversation.");
-    }
-
-    function getExportPrompt(): string {
-        // This function will return the appropriate prompt based on the service
-        // For now, we'll use the commonInstructions as a fallback
-        return commonInstructions;
     }
 };
