@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import type { Agent, Message, MonitorScore, Service } from '../types';
 
 // Get API key from Vite environment variables
-const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+const getApiKey = () => import.meta.env.VITE_OPENAI_API_KEY;
 
 // Only initialize OpenAI client if API key is available
 // This allows the app to work in production with Cloudflare service even without the key
@@ -22,6 +22,7 @@ function ensureOpenAIAvailable() {
   }
   return openai;
 }
+
 
 // Using gpt-4o-mini as it's the cheapest model that supports JSON mode
 const model = 'gpt-4o-mini';
@@ -114,8 +115,10 @@ Based on the history and agent roles, evaluate each agent's potential contributi
 `;
 
     try {
+
         const client = ensureOpenAIAvailable();
         const response = await client.chat.completions.create({
+
             model,
             messages: [
                 {
@@ -171,8 +174,10 @@ It is now your turn to speak. As ${agent.name}, continue the conversation natura
 `;
 
     try {
+
         const client = ensureOpenAIAvailable();
         const response = await client.chat.completions.create({
+
             model,
             messages: [
                 {
@@ -291,8 +296,10 @@ export const generateExportReport = async (conversation: Message[], service: Ser
     const prompt = getExportReportPrompt(conversationHistory, service, userName);
 
     try {
+
         const client = ensureOpenAIAvailable();
         const response = await client.chat.completions.create({
+
             model,
             messages: [
                 {
