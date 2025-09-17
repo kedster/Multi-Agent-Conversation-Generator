@@ -59,26 +59,33 @@ The repository includes several configuration files for Cloudflare deployment:
 
 ### `functions/` Directory
 
+Cloudflare Pages Functions (ES Module format):
+
 - `functions/_middleware.ts`: Handles CORS headers for all requests
-- `functions/api/openai.ts`: Proxies OpenAI API calls securely
-- `functions/index.ts`: Entry point for Cloudflare Functions
+- `functions/api/openai.ts`: Proxies OpenAI API calls securely  
+- `functions/api/health.ts`: Health check endpoint for monitoring
+
+**Note**: All functions use ES Module format (`export async function`) for compatibility with Cloudflare's latest requirements. No manual `index.ts` entry point is needed.
 
 ### `wrangler.toml`
 
-Configuration file for Wrangler CLI (optional, mainly for local development):
+Configuration file for Wrangler CLI (for local development with `wrangler pages dev`):
 
 ```toml
+# Cloudflare Pages project configuration
+# This project uses Cloudflare Pages with Functions, not standalone Workers
 name = "multi-agent-conversation-generator"
-main = "functions/index.ts"
+pages_build_output_dir = "dist"
 compatibility_date = "2024-01-01"
 
 [build]
 command = "npm run build"
-destination = "dist"
 
-[vars]
-ENVIRONMENT = "production"
+[env.production]
+name = "multi-agent-conversation-generator"
 ```
+
+⚠️ **Note**: This project uses **Cloudflare Pages Functions** with ES Modules, not standalone Workers. The functions automatically use ES Module format for compatibility with Cloudflare's latest requirements.
 
 ### `_cloudflare.toml`
 
@@ -144,6 +151,16 @@ Access these in your Cloudflare Pages dashboard.
 1. Check that all environment variables are set correctly
 2. Ensure the build command and output directory are correct
 3. Review build logs in the Cloudflare Pages dashboard
+
+### Worker/ES Module Issues ⚠️
+
+**Issue**: "Service Worker syntax script to the version upload API, which only supports ES Modules"
+
+**Solution**: This project is configured for Cloudflare Pages with Functions (ES Modules). Ensure you:
+1. Deploy via Cloudflare Pages Dashboard, NOT as a standalone Worker
+2. Use the `functions/` directory structure for API endpoints
+3. Don't manually deploy `functions/index.ts` as a Worker
+4. The `wrangler.toml` is for local development only
 
 ### API Errors
 
