@@ -1,10 +1,9 @@
-name = "multi-agent-conversation-generator"
+name = "multicahtbackend"
 main = "functions/index.ts"
 compatibility_date = "2024-01-01"
 
 [build]
-command = "npm run build"
-destination = "dist"
+command = "npm run build:worker"
 
 [vars]
 ENVIRONMENT = "production"
@@ -13,7 +12,7 @@ ENVIRONMENT = "production"
 # OPENAI_API_KEY = "your-key-here"  # Set this in the dashboard
 
 [[env.staging]]
-name = "multi-agent-conversation-generator-staging"
+name = "multicahtbackend-staging"
 
 [[env.production]]
-name = "multi-agent-conversation-generator"
+name = "multicahtbackend"
