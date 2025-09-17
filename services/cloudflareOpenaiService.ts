@@ -151,15 +151,26 @@ Respond ONLY with valid JSON matching the required schema.`;
             throw new Error("Invalid response structure from OpenAI");
         }
         
-        return decision;
+        // Map the scores to match the MonitorScore interface
+        // Convert engagement + expertise to context score
+        const mappedScores = decision.scores.map((score: any) => ({
+            agentId: score.agentId,
+            relevance: score.relevance || 5,
+            context: Math.round(((score.engagement || 5) + (score.expertise || 5)) / 2)
+        }));
+        
+        return {
+            scores: mappedScores,
+            reasoning: decision.reasoning,
+            nextSpeakerAgentId: decision.nextSpeakerAgentId
+        };
     } catch (error) {
         console.error("Error getting next speaker:", error);
-        // Fallback: return the first agent
+        // Fallback: return the first agent with proper MonitorScore format
         const fallbackScores = agents.map(agent => ({
             agentId: agent.id,
             relevance: 5,
-            engagement: 5,
-            expertise: 5
+            context: 5  // Map to context instead of engagement/expertise
         }));
         
         return {

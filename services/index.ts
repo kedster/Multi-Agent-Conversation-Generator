@@ -5,13 +5,22 @@
 // Check if we're running in a Cloudflare Pages environment
 const isCloudflarePages = typeof window !== 'undefined' && 
   (window.location.hostname.includes('.pages.dev') || 
-   window.location.hostname.includes('cloudflare') ||
-   // Also use Cloudflare service if API_KEY is not available (production mode)
-   !import.meta.env.VITE_OPENAI_API_KEY);
+   window.location.hostname.includes('cloudflare'));
 
-// Import both services
+// Check if we have a valid OpenAI API key for direct access
+const hasValidApiKey = () => {
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+  return apiKey && apiKey !== 'test_key_for_development' && apiKey.length > 10;
+};
+
+// Use direct OpenAI if we have a valid API key, otherwise fallback to Cloudflare or mock
+const useDirectOpenAI = hasValidApiKey() && !isCloudflarePages;
+const useMockService = !hasValidApiKey() && !isCloudflarePages;
+
+// Import all services
 import * as originalService from './openaiService';
 import * as cloudflareService from './cloudflareOpenaiService';
+import * as mockService from './mockService';
 
 // Wrapper function to match the original interface
 async function cloudflareGetMonitorDecision(
@@ -40,16 +49,22 @@ async function cloudflareGetAgentResponse(
 }
 
 // Export the appropriate service functions
-export const getNextSpeaker = isCloudflarePages 
-  ? cloudflareGetMonitorDecision 
-  : originalService.getMonitorDecision;
+export const getNextSpeaker = useDirectOpenAI 
+  ? originalService.getMonitorDecision 
+  : useMockService 
+    ? mockService.getMonitorDecision
+    : cloudflareGetMonitorDecision;
 
-export const getAgentResponse = isCloudflarePages 
-  ? cloudflareGetAgentResponse 
-  : originalService.getAgentResponse;
+export const getAgentResponse = useDirectOpenAI 
+  ? originalService.getAgentResponse 
+  : useMockService
+    ? mockService.getAgentResponse
+    : cloudflareGetAgentResponse;
 
-export const generateExportReport = isCloudflarePages 
-  ? cloudflareService.generateExportReport 
-  : originalService.generateExportReport;
+export const generateExportReport = useDirectOpenAI 
+  ? originalService.generateExportReport 
+  : useMockService
+    ? mockService.generateExportReport
+    : cloudflareService.generateExportReport;
 
-export { isCloudflarePages };
+export { isCloudflarePages, useDirectOpenAI, useMockService };
