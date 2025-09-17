@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Agent, Message, MonitorScore, Service } from '../types';
-import { getMonitorDecision, getAgentResponse } from '../services/openaiService';
+import { getNextSpeaker, getAgentResponse } from '../services';
 import { UserIcon, SendIcon, FileExportIcon } from './icons';
 
 interface ConversationScreenProps {
@@ -64,7 +64,7 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
             const agent1 = agents.find(a => a.id === agent1Id);
             setStatusMessage(`Monitor is giving ${agent1?.name} a chance to speak...`);
             // Monitor decides the *second* speaker
-            const monitorDecision = await getMonitorDecision(conversationAfterUser, agents, userName, agent1Id);
+            const monitorDecision = await getNextSpeaker(conversationAfterUser, agents, userName);
              if (!monitorDecision || !monitorDecision.nextSpeakerAgentId || !monitorDecision.scores) {
                 throw new Error("Invalid response from monitor agent.");
             }
@@ -73,7 +73,7 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
         } else {
             // 2. Normal Logic: Monitor decides both speakers
             setStatusMessage('Monitor is analyzing the conversation...');
-            const monitorDecision = await getMonitorDecision(conversationAfterUser, agents, userName);
+            const monitorDecision = await getNextSpeaker(conversationAfterUser, agents, userName);
             if (!monitorDecision || !monitorDecision.nextSpeakerAgentId || !monitorDecision.scores) {
                 throw new Error("Invalid response from monitor agent.");
             }

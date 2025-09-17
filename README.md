@@ -53,7 +53,7 @@ An interactive React application that simulates realistic conversations between 
    ```
    Then edit `.env.local` and add your OpenAI API key:
    ```
-   OPENAI_API_KEY=your_openai_api_key_here
+   VITE_OPENAI_API_KEY=your_openai_api_key_here
    ```
 
 4. **Start the development server**
@@ -84,6 +84,35 @@ npm run build
 npm run preview
 ```
 
+## 🚀 Deployment
+
+### Cloudflare Pages (Recommended)
+
+This application is optimized for deployment on Cloudflare Pages with Workers for secure API handling.
+
+**Quick Deploy:**
+```bash
+npm run deploy:cloudflare
+```
+
+For detailed deployment instructions, see [CLOUDFLARE_DEPLOYMENT.md](./CLOUDFLARE_DEPLOYMENT.md).
+
+**Key Features:**
+- 🔒 Secure API key handling via Cloudflare Workers
+- 🌍 Global CDN for fast loading
+- 📊 Built-in analytics and monitoring
+- 💰 Generous free tier
+- 🔄 Automatic deployments from GitHub
+
+### Other Deployment Options
+
+The application can also be deployed to:
+- **Vercel**: Set `VITE_OPENAI_API_KEY` in environment variables
+- **Netlify**: Add build command `npm run build` and publish directory `dist`
+- **Static Hosting**: Any service that can serve static files (S3, GitHub Pages, etc.)
+
+⚠️ **Security Note**: When deploying to static hosting, your OpenAI API key will be exposed in the browser. Use Cloudflare Pages or similar serverless platforms for production deployments.
+
 ## 🎯 Use Cases
 
 - **Team Planning**: Simulate team discussions for project planning and decision-making
@@ -98,6 +127,8 @@ npm run preview
 - **Styling**: Tailwind CSS
 - **AI Integration**: OpenAI GPT-4o-mini API
 - **Build Tool**: Vite
+- **Deployment**: Cloudflare Pages + Workers
+- **API Security**: Cloudflare Functions (serverless proxy)
 - **Export Features**: jsPDF and html2canvas for document generation
 
 ## 📄 License

@@ -1,22 +1,41 @@
-import OpenAI from 'openai';
 import type { Agent, Message, MonitorScore, Service } from '../types';
 
-// Get API key from Vite environment variables
-const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-
-if (!apiKey) {
-  // The user's environment must have the API key.
-  // If it is not set, the application will fail to initialize.
-  throw new Error("VITE_OPENAI_API_KEY environment variable not set.");
-}
-
-const openai = new OpenAI({ 
-  apiKey: apiKey,
-  dangerouslyAllowBrowser: true // Allow browser usage for client-side apps
-});
+// Configuration for API endpoint
+const API_BASE_URL = typeof window !== 'undefined' 
+  ? window.location.origin  // Use current domain in browser
+  : 'http://localhost:5173'; // Fallback for development
 
 // Using gpt-4o-mini as it's the cheapest model that supports JSON mode
 const model = 'gpt-4o-mini';
+
+// Helper function to make API calls to our Cloudflare Worker
+async function callOpenAI(messages: any[], temperature: number = 0.8, maxTokens: number = 500, responseFormat?: any) {
+  const body: any = {
+    model,
+    messages,
+    temperature,
+    max_tokens: maxTokens,
+  };
+
+  if (responseFormat) {
+    body.response_format = responseFormat;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/openai`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Failed to parse error response' }));
+    throw new Error(errorData.error || `API request failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
 
 function formatConversationHistory(conversation: Message[], userName: string): string {
     if (conversation.length === 0) return "The conversation has not started yet.";
@@ -51,132 +70,144 @@ const monitorDecisionSchema = {
                     agentId: { type: "string" },
                     relevance: { 
                         type: "number", 
-                        description: "Score from 1-10 on how relevant this agent's contribution would be." 
+                        minimum: 1, 
+                        maximum: 10,
+                        description: "How relevant is this agent to the current conversation topic (1-10)"
                     },
-                    context: { 
+                    engagement: { 
                         type: "number", 
-                        description: "Score from 1-10 on how well this agent can carry the current context forward." 
+                        minimum: 1, 
+                        maximum: 10,
+                        description: "How engaged/interested this agent would be in responding (1-10)"
                     },
+                    expertise: { 
+                        type: "number", 
+                        minimum: 1, 
+                        maximum: 10,
+                        description: "How much expertise this agent has on the current topic (1-10)"
+                    }
                 },
-                required: ["agentId", "relevance", "context"],
-            },
+                required: ["agentId", "relevance", "engagement", "expertise"]
+            }
         },
-        reasoning: {
+        reasoning: { 
             type: "string",
-            description: "A brief explanation for why the next speaker was chosen.",
+            description: "Brief explanation of why this agent should speak next"
         },
-        nextSpeakerAgentId: {
+        nextSpeakerAgentId: { 
             type: "string",
-            description: "The ID of the agent that should speak next.",
-        },
+            description: "The ID of the agent who should speak next"
+        }
     },
-    required: ["scores", "reasoning", "nextSpeakerAgentId"],
+    required: ["scores", "reasoning", "nextSpeakerAgentId"]
 };
 
-export const getMonitorDecision = async (
+export const getNextSpeaker = async (
     conversation: Message[], 
-    agents: Agent[],
-    userName: string,
-    agentToExcludeId?: string
-): Promise<MonitorDecision | null> => {
+    agents: Agent[], 
+    userName: string
+): Promise<MonitorDecision> => {
     const conversationHistory = formatConversationHistory(conversation, userName);
     const agentProfiles = formatAgentProfiles(agents);
     
-    let exclusionPrompt = "";
-    if (agentToExcludeId) {
-        const excludedAgent = agents.find(a => a.id === agentToExcludeId);
-        if (excludedAgent) {
-            exclusionPrompt = `
-NOTE: ${excludedAgent.name} (ID: ${excludedAgent.id}) has already been selected to speak. Your task is to select the *next best* agent to speak immediately after them. Do not select ${excludedAgent.name}.`;
-        }
-    }
+    const prompt = `You are a conversation monitor for a multi-agent discussion. Your job is to decide which agent should speak next based on the current conversation context and each agent's expertise and engagement level.
 
-    const prompt = `
-You are a multi-agent conversation moderator. Your task is to analyze the conversation so far, the profiles of the available agents, and the last message from the user, ${userName}, to decide who should speak next.
-
-**Agent Profiles:**
-${agentProfiles}
-
-**Conversation History:**
+Current Conversation:
 ${conversationHistory}
 
-${exclusionPrompt}
+Available Agents:
+${agentProfiles}
 
-Based on the history and agent roles, evaluate each agent's potential contribution. Provide a relevance and context score (1-10) for each. Then, decide which agent should speak next to make the conversation most engaging and coherent. Provide your response in the specified JSON format.
-`;
+Analyze the conversation and rate each agent on:
+1. Relevance (1-10): How relevant is this agent to the current topic?
+2. Engagement (1-10): How engaged/interested would this agent be?
+3. Expertise (1-10): How much expertise does this agent have on the topic?
+
+Then select the best agent to speak next and provide reasoning.
+
+Respond ONLY with valid JSON matching the required schema.`;
 
     try {
-        const response = await openai.chat.completions.create({
-            model,
-            messages: [
-                {
-                    role: "system",
-                    content: "You are a helpful assistant that always responds with valid JSON according to the provided schema."
-                },
-                {
-                    role: "user",
-                    content: prompt
-                }
-            ],
-            response_format: { type: "json_object" },
-            temperature: 0.7,
-        });
-
-        const jsonText = response.choices[0].message.content;
-        if (!jsonText) {
+        const response = await callOpenAI([
+            {
+                role: "system",
+                content: "You are a conversation monitor. Respond only with valid JSON."
+            },
+            {
+                role: "user",
+                content: prompt
+            }
+        ], 0.3, 800, { type: "json_object" });
+        
+        const content = response.choices[0].message.content;
+        if (!content) {
             throw new Error("No response content received from OpenAI");
         }
         
-        return JSON.parse(jsonText) as MonitorDecision;
+        const decision = JSON.parse(content);
+        
+        // Validate the response structure
+        if (!decision.scores || !Array.isArray(decision.scores) || !decision.nextSpeakerAgentId || !decision.reasoning) {
+            throw new Error("Invalid response structure from OpenAI");
+        }
+        
+        return decision;
     } catch (error) {
-        console.error("Error getting monitor decision:", error);
-        throw new Error("Failed to get a decision from the monitor agent.");
+        console.error("Error getting next speaker:", error);
+        // Fallback: return the first agent
+        const fallbackScores = agents.map(agent => ({
+            agentId: agent.id,
+            relevance: 5,
+            engagement: 5,
+            expertise: 5
+        }));
+        
+        return {
+            scores: fallbackScores,
+            reasoning: "Fallback selection due to API error",
+            nextSpeakerAgentId: agents[0].id
+        };
     }
 };
 
-export const getAgentResponse = async (conversation: Message[], agents: Agent[], agentId: string, userName: string): Promise<string> => {
-    const agent = agents.find(a => a.id === agentId);
-    if (!agent) {
-        throw new Error(`Agent with ID ${agentId} not found.`);
-    }
-
+export const getAgentResponse = async (
+    agent: Agent, 
+    conversation: Message[], 
+    userName: string
+): Promise<string> => {
     const conversationHistory = formatConversationHistory(conversation, userName);
-    const agentProfiles = formatAgentProfiles(agents);
+    
+    const prompt = `You are participating in a multi-agent conversation simulation. Here is the conversation so far:
 
-    const prompt = `
-You are an AI assistant role-playing as a character in a conversation. Your goal is to converse with the user, ${userName}, and the other agents.
-
-**Your Character Profile:**
-Name: ${agent.name}
-Role/Personality: ${agent.role}
-${agent.startingContext ? `Your starting objective: ${agent.startingContext}`: ''}
-
-**All Agent Profiles in this Conversation:**
-${agentProfiles}
-
-**Conversation History:**
 ${conversationHistory}
 
----
+Your character details:
+- Name: ${agent.name}
+- Role: ${agent.role}
+- Starting Context: ${agent.startingContext}
+
+Guidelines:
+- Stay in character based on your role and personality
+- Respond naturally to the conversation flow
+- Reference previous messages when relevant
+- Keep responses concise but meaningful (2-3 sentences typically)
+- Don't repeat what others have already said
+- Show your unique perspective based on your role
+
 It is now your turn to speak. As ${agent.name}, continue the conversation naturally. Refer to the user as ${userName} when appropriate. Do not repeat what others have said. Provide only your response, without your name or any preamble. Your response should be a single, coherent message.
 `;
 
     try {
-        const response = await openai.chat.completions.create({
-            model,
-            messages: [
-                {
-                    role: "system",
-                    content: `You are role-playing as ${agent.name}. ${agent.role}`
-                },
-                {
-                    role: "user",
-                    content: prompt
-                }
-            ],
-            temperature: 0.8,
-            max_tokens: 500,
-        });
+        const response = await callOpenAI([
+            {
+                role: "system",
+                content: `You are role-playing as ${agent.name}. ${agent.role}`
+            },
+            {
+                role: "user",
+                content: prompt
+            }
+        ], 0.8, 500);
         
         const content = response.choices[0].message.content;
         if (!content) {
@@ -190,21 +221,22 @@ It is now your turn to speak. As ${agent.name}, continue the conversation natura
     }
 };
 
-const getExportReportPrompt = (conversationHistory: string, service: Service, userName: string): string => {
-    const commonInstructions = `
-You are an expert executive assistant tasked with synthesizing a discussion into an actionable, professional report.
-Your output MUST be a standalone professional document, formatted in clean HTML. It IS NOT a summary of a conversation.
-CRITICAL INSTRUCTIONS:
-- DO NOT include a transcript, chat logs, or direct back-and-forth dialogue.
-- DO NOT mention the AI agent names (e.g., 'Alex Frontend Engineer', 'Brenda Backend Engineer').
-- DO NOT refer to the user by name in the body of the report (e.g. "${userName} said..."). You may list participants in an 'Attendees' section if appropriate for the format, where you can list "${userName} (User)".
-- Synthesize the key points, decisions, arguments, and outcomes into a cohesive, professional document.
-- The final document must be immediately usable and understandable by a stakeholder who was NOT present at the meeting.
+export const generateExportReport = async (
+    conversationHistory: Message[], 
+    service: Service, 
+    userName: string
+): Promise<string> => {
+    const formattedHistory = formatConversationHistory(conversationHistory, userName);
+    
+    const commonInstructions = `You are tasked with creating a professional report based on a multi-agent conversation. Use the conversation transcript below to generate a well-structured HTML document.
+
+Guidelines for HTML Generation:
+- Generate clean, semantic HTML without any CSS styling (styling will be applied externally)
 - The HTML should be a single block that can be embedded inside a styled container. Do not include <html> or <body> tags.
 - Use <h2> for the main title and <h3> for section titles. Use <p>, <ul>, <li>, and <strong> for clear structure.
 
 Conversation Transcript to be Synthesized:
-${conversationHistory}
+${formattedHistory}
 ---
 Generate the HTML report based on the specific instructions for the theme "${service.name}" below.
 `;
@@ -263,39 +295,36 @@ Generate the HTML report based on the specific instructions for the theme "${ser
             - **Main Title:** "Campaign Primer: ${service.name}"
             - **Sections:**
                 1.  "<h3>World Setting & Core Conflict</h3>" (Provide an evocative summary of the world and the central problem the players will face).
-                2.  "<h3>The Adventuring Party</h3>" (Synthesize the different character concepts discussed into a cohesive party concept, highlighting potential dynamics and roles).
-                3.  "<h3>Campaign Themes & Tone</h3>" (Based on the discussion, define the agreed-upon style of play, e.g., 'A story-driven campaign with challenging tactical combat focusing on character redemption arcs').
-                4.  "<h3>Session Zero Agreements</h3>" (List any "house rules" or player agreements that came out of the planning session).
+                2.  "<h3>Key NPCs & Factions</h3>" (List the important characters and groups the party will encounter, with brief descriptions).
+                3.  "<h3>House Rules & Character Guidelines</h3>" (Summarize any agreed-upon modifications to gameplay and character creation constraints).
+                4.  "<h3>Session Plan & Expectations</h3>" (Outline the campaign's structure and what players can expect in terms of tone, frequency, and style).
             `;
         default:
             return `${commonInstructions}
-            **Theme: General Meeting Summary**
-            - **Main Title:** "Meeting Summary"
-            - **Sections:** "Key Topics Discussed", "Main Outcomes & Decisions", "Action Items".
+            **Theme: Meeting Summary**
+            - **Format:** Professional meeting summary
+            - **Main Title:** "Summary: ${service.name}"
+            - **Sections:**
+                1.  "<h3>Discussion Overview</h3>" (Summarize the main topics discussed).
+                2.  "<h3>Key Points</h3>" (List the most important points raised).
+                3.  "<h3>Decisions Made</h3>" (Detail any conclusions or decisions reached).
+                4.  "<h3>Next Steps</h3>" (List any action items or follow-up tasks).
             `;
     }
-}
 
-export const generateExportReport = async (conversation: Message[], service: Service, userName: string): Promise<string> => {
-    const conversationHistory = formatConversationHistory(conversation, userName);
-    const prompt = getExportReportPrompt(conversationHistory, service, userName);
-
+    const prompt = getExportPrompt();
+    
     try {
-        const response = await openai.chat.completions.create({
-            model,
-            messages: [
-                {
-                    role: "system",
-                    content: "You are an expert executive assistant. Generate clean, professional HTML reports."
-                },
-                {
-                    role: "user",
-                    content: prompt
-                }
-            ],
-            temperature: 0.3,
-            max_tokens: 2000,
-        });
+        const response = await callOpenAI([
+            {
+                role: "system",
+                content: "You are an expert executive assistant. Generate clean, professional HTML reports."
+            },
+            {
+                role: "user",
+                content: prompt
+            }
+        ], 0.3, 2000);
         
         const content = response.choices[0].message.content;
         if (!content) {
@@ -306,5 +335,11 @@ export const generateExportReport = async (conversation: Message[], service: Ser
     } catch (error) {
         console.error("Error generating export report:", error);
         throw new Error("The AI failed to generate a report from the conversation.");
+    }
+
+    function getExportPrompt(): string {
+        // This function will return the appropriate prompt based on the service
+        // For now, we'll use the commonInstructions as a fallback
+        return commonInstructions;
     }
 };

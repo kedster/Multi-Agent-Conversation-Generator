@@ -1,0 +1,40 @@
+# Cloudflare Pages configuration
+# This file configures how Cloudflare Pages builds and deploys your application
+
+[build]
+  # Build command for the project
+  command = "npm run build"
+  
+  # Output directory
+  publish = "dist"
+  
+  # Build environment variables
+  [build.environment]
+    NODE_VERSION = "18"
+    NPM_VERSION = "8"
+
+[functions]
+  # Directory containing Cloudflare Pages Functions
+  directory = "functions"
+  
+  # Node.js compatibility date
+  node_compat = true
+
+# Redirect rules for SPA
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Headers for security and performance
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

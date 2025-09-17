@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy:cloudflare": "./deploy-cloudflare.sh",
+    "preview:cloudflare": "wrangler pages dev dist"
   },
   "dependencies": {
     "html2canvas": "^1.4.1",
@@ -18,6 +20,7 @@
   "devDependencies": {
     "@types/node": "^22.14.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "wrangler": "^3.0.0"
   }
 }
