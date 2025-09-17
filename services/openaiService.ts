@@ -2,18 +2,24 @@ import OpenAI from 'openai';
 import type { Agent, Message, MonitorScore, Service } from '../types';
 
 // Get API key from Vite environment variables
-const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+const getApiKey = () => import.meta.env.VITE_OPENAI_API_KEY;
 
-if (!apiKey) {
-  // The user's environment must have the API key.
-  // If it is not set, the application will fail to initialize.
-  throw new Error("VITE_OPENAI_API_KEY environment variable not set.");
-}
+// Lazy initialization of OpenAI client to prevent module load errors
+let openai: OpenAI | null = null;
 
-const openai = new OpenAI({ 
-  apiKey: apiKey,
-  dangerouslyAllowBrowser: true // Allow browser usage for client-side apps
-});
+const getOpenAI = () => {
+  if (!openai) {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      throw new Error("VITE_OPENAI_API_KEY environment variable not set.");
+    }
+    openai = new OpenAI({ 
+      apiKey: apiKey,
+      dangerouslyAllowBrowser: true // Allow browser usage for client-side apps
+    });
+  }
+  return openai;
+};
 
 // Using gpt-4o-mini as it's the cheapest model that supports JSON mode
 const model = 'gpt-4o-mini';
@@ -106,7 +112,7 @@ Based on the history and agent roles, evaluate each agent's potential contributi
 `;
 
     try {
-        const response = await openai.chat.completions.create({
+        const response = await getOpenAI().chat.completions.create({
             model,
             messages: [
                 {
@@ -162,7 +168,7 @@ It is now your turn to speak. As ${agent.name}, continue the conversation natura
 `;
 
     try {
-        const response = await openai.chat.completions.create({
+        const response = await getOpenAI().chat.completions.create({
             model,
             messages: [
                 {
@@ -281,7 +287,7 @@ export const generateExportReport = async (conversation: Message[], service: Ser
     const prompt = getExportReportPrompt(conversationHistory, service, userName);
 
     try {
-        const response = await openai.chat.completions.create({
+        const response = await getOpenAI().chat.completions.create({
             model,
             messages: [
                 {
