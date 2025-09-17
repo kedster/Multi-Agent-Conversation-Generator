@@ -8,7 +8,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy:cloudflare": "./deploy-cloudflare.sh",
-    "preview:cloudflare": "wrangler pages dev dist"
+    "preview:cloudflare": "wrangler pages dev dist",
+    "dev:worker": "wrangler dev worker.ts --config wrangler-worker.toml",
+    "deploy:worker": "wrangler deploy --config wrangler-worker.toml",
+    "deploy:worker:staging": "wrangler deploy --config wrangler-worker.toml --env staging"
   },
   "dependencies": {
     "html2canvas": "^1.4.1",

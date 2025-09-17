@@ -31,8 +31,19 @@ An interactive React application that simulates realistic conversations between 
 
 ## 🛠️ Prerequisites
 
+### For Local Development
 - **Node.js** (version 16 or higher)
 - **OpenAI API Key** - Get yours at [OpenAI Platform](https://platform.openai.com/account/api-keys)
+
+### For Cloud Deployment (Choose One)
+- **Option A: Cloudflare Workers + AI Workers** (Recommended)
+  - Cloudflare account
+  - Wrangler CLI (`npm install -g wrangler`)
+  - **No OpenAI API key needed** - uses Cloudflare's built-in AI models
+
+- **Option B: Cloudflare Pages + Functions**
+  - Cloudflare account
+  - OpenAI API key for backend processing
 
 ## ⚡ Quick Start
 
@@ -86,9 +97,28 @@ npm run preview
 
 ## 🚀 Deployment
 
-### Cloudflare Pages (Recommended)
+This application supports multiple deployment approaches:
 
-This application is optimized for deployment on Cloudflare Pages with Workers for secure API handling.
+### Option A: Cloudflare Workers + AI Workers (Recommended)
+
+**No OpenAI API key required!** Uses Cloudflare's built-in AI models.
+
+**Quick Deploy:**
+```bash
+npm run deploy:worker
+```
+
+**Features:**
+- 🤖 Built-in AI models (no external API keys needed)
+- 💰 Cost-effective for high usage
+- ⚡ Fast global deployment
+- 🔧 Automatic AI model management
+
+For detailed instructions, see [CLOUDFLARE_WORKERS_AI.md](./CLOUDFLARE_WORKERS_AI.md).
+
+### Option B: Cloudflare Pages + Functions
+
+Uses OpenAI API through secure Cloudflare Functions proxy.
 
 **Quick Deploy:**
 ```bash

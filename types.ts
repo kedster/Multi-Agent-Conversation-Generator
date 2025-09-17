@@ -1,4 +1,6 @@
 
+import type { ReactNode } from 'react';
+
 export interface Agent {
   id: string;
   name: string;
@@ -11,7 +13,7 @@ export interface Service {
   id: string;
   name: string;
   description: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   agents: Agent[];
 }
 
@@ -26,7 +28,8 @@ export interface Message {
 export interface MonitorScore {
   agentId: string;
   relevance: number;
-  context: number;
+  engagement: number;
+  expertise: number;
 }
 
 export enum Screen {

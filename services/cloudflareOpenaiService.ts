@@ -31,7 +31,8 @@ async function callOpenAI(messages: any[], temperature: number = 0.8, maxTokens:
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Failed to parse error response' }));
-    throw new Error(errorData.error || `API request failed with status ${response.status}`);
+    const errorMessage = (errorData as any)?.error || `API request failed with status ${response.status}`;
+    throw new Error(errorMessage);
   }
 
   return response.json();
@@ -139,7 +140,7 @@ Respond ONLY with valid JSON matching the required schema.`;
             }
         ], 0.3, 800, { type: "json_object" });
         
-        const content = response.choices[0].message.content;
+        const content = (response as any)?.choices?.[0]?.message?.content;
         if (!content) {
             throw new Error("No response content received from OpenAI");
         }
@@ -209,7 +210,7 @@ It is now your turn to speak. As ${agent.name}, continue the conversation natura
             }
         ], 0.8, 500);
         
-        const content = response.choices[0].message.content;
+        const content = (response as any)?.choices?.[0]?.message?.content;
         if (!content) {
             throw new Error("No response content received from OpenAI");
         }
@@ -326,7 +327,7 @@ Generate the HTML report based on the specific instructions for the theme "${ser
             }
         ], 0.3, 2000);
         
-        const content = response.choices[0].message.content;
+        const content = (response as any)?.choices?.[0]?.message?.content;
         if (!content) {
             throw new Error("No response content received from OpenAI");
         }

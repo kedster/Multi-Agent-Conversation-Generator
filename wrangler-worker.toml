@@ -1,0 +1,15 @@
+name = "multi-agent-conversation-worker"
+main = "worker.ts"
+compatibility_date = "2024-01-01"
+
+[ai]
+binding = "MCA"
+
+[env.production]
+name = "multi-agent-conversation-worker"
+
+[env.staging] 
+name = "multi-agent-conversation-worker-staging"
+
+# Environment variables will be set in the Cloudflare dashboard
+# OPENAI_API_KEY = "your-key-here"  # Optional fallback, set this in the dashboard
