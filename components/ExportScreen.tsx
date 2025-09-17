@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { Message, Service } from '../types';
 import { getStyledReport, downloadHtml, downloadPdf } from '../utils/exportUtils';
-import { generateExportReport } from '../services/openaiService';
+import { generateExportReport } from '../services';
 import { DownloadIcon, FileCodeIcon, HomeIcon } from './icons';
 
 interface ExportScreenProps {
