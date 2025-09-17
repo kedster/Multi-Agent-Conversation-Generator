@@ -61,20 +61,15 @@ The repository includes several configuration files for Cloudflare deployment:
 
 - `functions/_middleware.ts`: Handles CORS headers for all requests
 - `functions/api/openai.ts`: Proxies OpenAI API calls securely
-- `functions/index.ts`: Entry point for Cloudflare Functions
+- `functions/api/health.ts`: Health check endpoint for monitoring
 
 ### `wrangler.toml`
 
 Configuration file for Wrangler CLI (optional, mainly for local development):
 
 ```toml
-name = "multi-agent-conversation-generator"
-main = "functions/index.ts"
+name = "multicahtbackend"
 compatibility_date = "2024-01-01"
-
-[build]
-command = "npm run build"
-destination = "dist"
 
 [vars]
 ENVIRONMENT = "production"
