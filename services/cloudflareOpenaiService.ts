@@ -162,6 +162,87 @@ const monitorDecisionSchema = {
     required: ["scores", "reasoning", "nextSpeakerAgentId"]
 };
 
+// Dedicated AI Scorekeeper - Fifth agent that rates all agents based on context
+export const getScorekeeper = async (
+    conversation: Message[],
+    agents: Agent[],
+    userName: string,
+    userLatestMessage: string
+): Promise<MonitorDecision> => {
+    const conversationHistory = formatConversationHistory(conversation, userName);
+    const agentProfiles = formatAgentProfiles(agents);
+    
+    const prompt = `You are a dedicated AI Scorekeeper for a multi-agent conversation system. Your job is to analyze the conversation and rate each agent based on how well they can contribute to the user's specific needs.
+
+User's Latest Message: "${userLatestMessage}"
+
+Conversation History:
+${conversationHistory}
+
+Available Agents:
+${agentProfiles}
+
+Rate each agent (1-10) on these criteria:
+1. **Relevance**: How relevant is this agent's expertise to the user's current question/need?
+2. **Context**: How well can this agent build upon the existing conversation context?
+3. **Engagement**: How likely is this agent to provide valuable insights for this topic?
+4. **Expertise**: What level of domain knowledge does this agent have for this specific question?
+
+IMPORTANT: 
+- Give realistic varied scores (not all agents should have the same score)
+- Consider the specific context of what the user is asking
+- The two highest total scoring agents will speak next
+- Base scores on actual relevance to the conversation topic
+
+Select the agent with the highest combined score as the primary recommended speaker.`;
+
+    try {
+        const response = await callOpenAI([
+            {
+                role: "system",
+                content: "You are an expert conversation analyst and scorekeeper. Always provide detailed, varied scoring based on actual context relevance. Respond with valid JSON according to the schema."
+            },
+            {
+                role: "user",
+                content: prompt
+            }
+        ], 0.7, 800, {
+            type: "json_object",
+            schema: monitorDecisionSchema
+        });
+
+        const content = response.choices[0].message.content;
+        if (!content) {
+            throw new Error("No scorekeeper decision generated");
+        }
+
+        const decision = JSON.parse(content) as MonitorDecision;
+        
+        // Validate the response structure
+        if (!decision.scores || !Array.isArray(decision.scores) || !decision.nextSpeakerAgentId || !decision.reasoning) {
+            throw new Error("Invalid scorekeeper response structure");
+        }
+        
+        return decision;
+    } catch (error) {
+        console.error("Error getting scorekeeper decision:", error);
+        // Fallback with varied scores instead of all the same
+        const fallbackScores = agents.map((agent, index) => ({
+            agentId: agent.id,
+            relevance: 7 - index, // Varied scores 7,6,5,4
+            context: 6 - index,   // Varied scores 6,5,4,3  
+            engagement: 8 - index,
+            expertise: 5 + index
+        }));
+        
+        return {
+            scores: fallbackScores,
+            reasoning: "Fallback scoring with variation due to API error",
+            nextSpeakerAgentId: agents[0].id
+        };
+    }
+};
+
 export const getNextSpeaker = async (
     conversation: Message[], 
     agents: Agent[], 
@@ -169,97 +250,12 @@ export const getNextSpeaker = async (
     cumulativeScores?: Record<string, MonitorScore>,
     skippedTurns?: Record<string, number>
 ): Promise<MonitorDecision> => {
-    const conversationHistory = formatConversationHistory(conversation, userName);
-    const agentProfiles = formatAgentProfiles(agents);
+    // Get the user's latest message for context
+    const userMessages = conversation.filter(msg => msg.isUser);
+    const latestUserMessage = userMessages[userMessages.length - 1]?.text || "";
     
-    // Generate context summary for better scoring
-    const contextSummary = await generateConversationContext(conversation, userName);
-    
-    // Build scoring context
-    let scoringContext = '';
-    if (cumulativeScores && skippedTurns) {
-        scoringContext = `\nCurrent Agent Status:
-${agents.map(agent => {
-    const cumScore = cumulativeScores[agent.id] || { relevance: 0, context: 0 };
-    const skipped = skippedTurns[agent.id] || 0;
-    return `${agent.name}: Total Score: ${cumScore.relevance + cumScore.context}, Skipped Turns: ${skipped}`;
-}).join('\n')}
-
-IMPORTANT RULES:
-- If any agent has skipped 2 or more turns, prioritize them for speaking
-- Avoid having the same agent speak consecutively unless absolutely necessary
-- Consider both topic relevance AND fairness in turn distribution
-`;
-    }
-    
-    const prompt = `You are a conversation monitor for a multi-agent discussion. Your job is to decide which agent should speak next based on conversation context, agent expertise, and fair turn distribution.
-
-Current Conversation:
-${conversationHistory}
-
-Context Summary:
-Summary: ${contextSummary.summary}
-Key Points: ${contextSummary.keyPoints.join(', ')}
-User Intent: ${contextSummary.userIntent}
-
-Available Agents:
-${agentProfiles}
-${scoringContext}
-
-Analyze the conversation and rate each agent on:
-1. Relevance (1-10): How relevant is this agent to the current topic and user intent?
-2. Context (1-10): How well can this agent build on the conversation context?
-3. Engagement (1-10): How engaged/interested would this agent be?
-4. Expertise (1-10): How much expertise does this agent have on the topic?
-
-Consider fairness: agents who have been skipped should get priority, but still maintain conversation flow quality.
-
-Select the best agent to speak next and provide reasoning.
-
-Respond ONLY with valid JSON matching the required schema.`;
-
-    try {
-        const response = await callOpenAI([
-            {
-                role: "system",
-                content: "You are a conversation monitor. Respond only with valid JSON."
-            },
-            {
-                role: "user",
-                content: prompt
-            }
-        ], 0.3, 800, { type: "json_object" });
-        
-        const content = response.choices[0].message.content;
-        if (!content) {
-            throw new Error("No response content received from OpenAI");
-        }
-        
-        const decision = JSON.parse(content);
-        
-        // Validate the response structure
-        if (!decision.scores || !Array.isArray(decision.scores) || !decision.nextSpeakerAgentId || !decision.reasoning) {
-            throw new Error("Invalid response structure from OpenAI");
-        }
-        
-        return decision;
-    } catch (error) {
-        console.error("Error getting next speaker:", error);
-        // Fallback: return the first agent
-        const fallbackScores = agents.map(agent => ({
-            agentId: agent.id,
-            relevance: 5,
-            context: 5,
-            engagement: 5,
-            expertise: 5
-        }));
-        
-        return {
-            scores: fallbackScores,
-            reasoning: "Fallback selection due to API error",
-            nextSpeakerAgentId: agents[0].id
-        };
-    }
+    // Use the dedicated scorekeeper for more accurate scoring
+    return await getScorekeeper(conversation, agents, userName, latestUserMessage);
 };
 
 export const getAgentResponse = async (

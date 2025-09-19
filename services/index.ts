@@ -55,4 +55,9 @@ export const generateExportReport = isCloudflarePages
   ? cloudflareService.generateExportReport 
   : originalService.generateExportReport;
 
+// Export the new scorekeeper function for direct access
+export const getScorekeeper = isCloudflarePages 
+  ? cloudflareService.getScorekeeper
+  : originalService.getMonitorDecision; // Fallback to original for now
+
 export { isCloudflarePages };

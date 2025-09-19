@@ -45,35 +45,43 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
     return (cumulative.relevance + cumulative.context) + (currentScore.relevance + currentScore.context);
   };
 
-  // Function to determine next speaker based on scores and fairness
-  const selectNextSpeaker = (
+  // Function to determine the TWO speakers with highest scores
+  const selectTopTwoSpeakers = (
     scores: MonitorScore[], 
     agents: Agent[], 
     cumulativeScores: Record<string, MonitorScore>,
     skippedTurns: Record<string, number>,
     lastSpeakerIds: string[]
-  ) => {
-    // Priority 1: Anyone who has skipped 2+ turns gets priority
-    const forcedSpeaker = agents.find(a => skippedTurns[a.id] >= 2);
-    if (forcedSpeaker) {
-      return forcedSpeaker.id;
-    }
-
+  ): [string, string] => {
+    // Priority 1: Include anyone who has skipped 2+ turns
+    const forcedSpeakers = agents.filter(a => skippedTurns[a.id] >= 2);
+    
     // Priority 2: Avoid succession (same agent speaking consecutively)  
     const eligibleAgents = agents.filter(a => !lastSpeakerIds.includes(a.id));
-    const candidateAgents = eligibleAgents.length > 0 ? eligibleAgents : agents;
-
-    // Calculate total scores for eligible agents
-    const agentScores = candidateAgents.map(agent => ({
+    
+    // Calculate total scores for all agents
+    const agentScores = agents.map(agent => ({
       agentId: agent.id,
       totalScore: calculateTotalScore(agent.id, scores, cumulativeScores),
-      currentScore: scores.find(s => s.agentId === agent.id)
+      currentScore: scores.find(s => s.agentId === agent.id),
+      isForced: forcedSpeakers.some(fs => fs.id === agent.id),
+      isEligible: eligibleAgents.some(ea => ea.id === agent.id)
     }));
 
-    // Sort by total score (highest first)
-    agentScores.sort((a, b) => b.totalScore - a.totalScore);
+    // Sort by priority: forced speakers first, then by score, then by eligibility
+    agentScores.sort((a, b) => {
+      if (a.isForced && !b.isForced) return -1;
+      if (!a.isForced && b.isForced) return 1;
+      if (a.totalScore !== b.totalScore) return b.totalScore - a.totalScore;
+      if (a.isEligible && !b.isEligible) return -1;
+      if (!a.isEligible && b.isEligible) return 1;
+      return 0;
+    });
     
-    return agentScores[0]?.agentId || agents[0].id;
+    const speaker1 = agentScores[0]?.agentId || agents[0].id;
+    const speaker2 = agentScores[1]?.agentId || agents[1]?.id || agents[0].id;
+    
+    return [speaker1, speaker2];
   };
 
   const handleUserSubmit = async (e: React.FormEvent) => {
@@ -117,8 +125,8 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
 
       const turnScores = monitorDecision.scores;
 
-      // 2. Determine next speaker using our new logic
-      const nextSpeakerId = selectNextSpeaker(
+      // 2. Determine the TWO speakers with highest scores
+      const [speaker1Id, speaker2Id] = selectTopTwoSpeakers(
         turnScores,
         agents,
         cumulativeScores,
@@ -126,9 +134,11 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
         lastSpeakers
       );
 
-      const nextSpeaker = agents.find(a => a.id === nextSpeakerId);
-      if (!nextSpeaker) {
-        throw new Error("Could not determine next speaker.");
+      const speaker1 = agents.find(a => a.id === speaker1Id);
+      const speaker2 = agents.find(a => a.id === speaker2Id);
+      
+      if (!speaker1 || !speaker2) {
+        throw new Error("Could not determine speakers.");
       }
 
       // 3. Update cumulative scores
@@ -150,8 +160,8 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
       setSkippedTurns(prevSkipped => {
         const newSkipped = { ...prevSkipped };
         agents.forEach(agent => {
-          if (agent.id === nextSpeakerId) {
-            newSkipped[agent.id] = 0; // Reset for speaker
+          if (agent.id === speaker1Id || agent.id === speaker2Id) {
+            newSkipped[agent.id] = 0; // Reset for speakers
           } else {
             newSkipped[agent.id]++; // Increment for others
           }
@@ -159,25 +169,32 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
         return newSkipped;
       });
 
-      // 5. Generate agent response with enhanced context
-      setNextAgentId(nextSpeakerId);
-      setStatusMessage(`${nextSpeaker.name} is thinking...`);
+      // 5. Generate responses from BOTH agents simultaneously (separate API calls)
+      setNextAgentId(speaker1Id);
+      setStatusMessage(`${speaker1.name} and ${speaker2.name} are thinking...`);
       
-      const response = await getAgentResponse(
-        conversationAfterUser, 
-        agents, 
-        nextSpeakerId, 
-        userName
-      );
+      // Parallel API calls for both agents to maintain separate context
+      const [response1, response2] = await Promise.all([
+        getAgentResponse(conversationAfterUser, agents, speaker1Id, userName),
+        getAgentResponse(conversationAfterUser, agents, speaker2Id, userName)
+      ]);
       
-      const agentMessage: Message = {
-        agentId: nextSpeaker.id,
-        agentName: nextSpeaker.name,
-        text: response,
-        color: nextSpeaker.color,
+      const speaker1Message: Message = {
+        agentId: speaker1.id,
+        agentName: speaker1.name,
+        text: response1,
+        color: speaker1.color,
       };
       
-      setConversation(prev => [...prev, agentMessage]);
+      const speaker2Message: Message = {
+        agentId: speaker2.id,
+        agentName: speaker2.name,
+        text: response2,
+        color: speaker2.color,
+      };
+      
+      // Add both messages to conversation
+      setConversation(prev => [...prev, speaker1Message, speaker2Message]);
 
     } catch (error) {
       const errorMessage: Message = {
