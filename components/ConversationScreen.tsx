@@ -34,6 +34,48 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
     }
   }, [conversation]);
 
+  // Function to calculate total score for an agent
+  const calculateTotalScore = (agentId: string, currentScores: MonitorScore[], cumulativeScores: Record<string, MonitorScore>) => {
+    const currentScore = currentScores.find(s => s.agentId === agentId);
+    const cumulative = cumulativeScores[agentId] || { agentId, relevance: 0, context: 0 };
+    
+    if (!currentScore) return 0;
+    
+    // Total score = (cumulative relevance + context) + (current relevance + context)
+    return (cumulative.relevance + cumulative.context) + (currentScore.relevance + currentScore.context);
+  };
+
+  // Function to determine next speaker based on scores and fairness
+  const selectNextSpeaker = (
+    scores: MonitorScore[], 
+    agents: Agent[], 
+    cumulativeScores: Record<string, MonitorScore>,
+    skippedTurns: Record<string, number>,
+    lastSpeakerIds: string[]
+  ) => {
+    // Priority 1: Anyone who has skipped 2+ turns gets priority
+    const forcedSpeaker = agents.find(a => skippedTurns[a.id] >= 2);
+    if (forcedSpeaker) {
+      return forcedSpeaker.id;
+    }
+
+    // Priority 2: Avoid succession (same agent speaking consecutively)  
+    const eligibleAgents = agents.filter(a => !lastSpeakerIds.includes(a.id));
+    const candidateAgents = eligibleAgents.length > 0 ? eligibleAgents : agents;
+
+    // Calculate total scores for eligible agents
+    const agentScores = candidateAgents.map(agent => ({
+      agentId: agent.id,
+      totalScore: calculateTotalScore(agent.id, scores, cumulativeScores),
+      currentScore: scores.find(s => s.agentId === agent.id)
+    }));
+
+    // Sort by total score (highest first)
+    agentScores.sort((a, b) => b.totalScore - a.totalScore);
+    
+    return agentScores[0]?.agentId || agents[0].id;
+  };
+
   const handleUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userInput.trim() || isLoading) return;
@@ -52,104 +94,97 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
     setIsLoading(true);
 
     try {
-        let agent1Id: string | undefined;
-        let agent2Id: string | undefined;
-        let turnScores: MonitorScore[] = [];
+      // Get the last 2 speakers to prevent succession
+      const lastSpeakers = conversationAfterUser
+        .filter(msg => !msg.isUser)
+        .slice(-2)
+        .map(msg => msg.agentId);
 
-        // 1. "Fair Turn" Logic: Check if any agent must speak
-        const forcedAgentId = agents.find(a => skippedTurns[a.id] >= 2)?.id;
+      // 1. Monitor analyzes conversation and scores all agents
+      setStatusMessage('Monitor is analyzing conversation context...');
+      const monitorDecision = await getNextSpeaker(
+        conversationAfterUser, 
+        agents, 
+        userName, 
+        undefined, // agentToExcludeId - not used in our new system
+        cumulativeScores,
+        skippedTurns
+      );
 
-        if (forcedAgentId) {
-            agent1Id = forcedAgentId;
-            const agent1 = agents.find(a => a.id === agent1Id);
-            setStatusMessage(`Monitor is giving ${agent1?.name} a chance to speak...`);
-            // Monitor decides the *second* speaker
-            const monitorDecision = await getNextSpeaker(conversationAfterUser, agents, userName);
-             if (!monitorDecision || !monitorDecision.nextSpeakerAgentId || !monitorDecision.scores) {
-                throw new Error("Invalid response from monitor agent.");
-            }
-            agent2Id = monitorDecision.nextSpeakerAgentId;
-            turnScores = monitorDecision.scores;
-        } else {
-            // 2. Normal Logic: Monitor decides both speakers
-            setStatusMessage('Monitor is analyzing the conversation...');
-            const monitorDecision = await getNextSpeaker(conversationAfterUser, agents, userName);
-            if (!monitorDecision || !monitorDecision.nextSpeakerAgentId || !monitorDecision.scores) {
-                throw new Error("Invalid response from monitor agent.");
-            }
-            agent1Id = monitorDecision.nextSpeakerAgentId;
-            agent2Id = monitorDecision.scores
-                .filter(s => s.agentId !== agent1Id)
-                .sort((a, b) => (b.relevance + b.context) - (a.relevance + a.context))[0]?.agentId;
-            turnScores = monitorDecision.scores;
-        }
-
-      if (!agent1Id || !agent2Id) {
-          throw new Error("Could not determine agents to speak.");
-      }
-      
-      const agent1 = agents.find(a => a.id === agent1Id);
-      const agent2 = agents.find(a => a.id === agent2Id);
-
-      if (!agent1 || !agent2) {
-          throw new Error("Invalid agent selected by the monitor.");
+      if (!monitorDecision || !monitorDecision.scores) {
+        throw new Error("Invalid response from monitor agent.");
       }
 
-      // 3. Update scores and turn counters
+      const turnScores = monitorDecision.scores;
+
+      // 2. Determine next speaker using our new logic
+      const nextSpeakerId = selectNextSpeaker(
+        turnScores,
+        agents,
+        cumulativeScores,
+        skippedTurns,
+        lastSpeakers
+      );
+
+      const nextSpeaker = agents.find(a => a.id === nextSpeakerId);
+      if (!nextSpeaker) {
+        throw new Error("Could not determine next speaker.");
+      }
+
+      // 3. Update cumulative scores
       setCumulativeScores(prevScores => {
         const newScores = { ...prevScores };
         turnScores.forEach(score => {
-            if (newScores[score.agentId]) {
-                 newScores[score.agentId] = {
-                    agentId: score.agentId,
-                    relevance: newScores[score.agentId].relevance + score.relevance,
-                    context: newScores[score.agentId].context + score.context,
-                };
-            }
+          if (newScores[score.agentId]) {
+            newScores[score.agentId] = {
+              agentId: score.agentId,
+              relevance: newScores[score.agentId].relevance + score.relevance,
+              context: newScores[score.agentId].context + score.context,
+            };
+          }
         });
         return newScores;
       });
-      
+
+      // 4. Update skipped turns
       setSkippedTurns(prevSkipped => {
-          const newSkipped = { ...prevSkipped };
-          agents.forEach(agent => {
-              if (agent.id === agent1Id || agent.id === agent2Id) {
-                  newSkipped[agent.id] = 0;
-              } else {
-                  newSkipped[agent.id]++;
-              }
-          });
-          return newSkipped;
+        const newSkipped = { ...prevSkipped };
+        agents.forEach(agent => {
+          if (agent.id === nextSpeakerId) {
+            newSkipped[agent.id] = 0; // Reset for speaker
+          } else {
+            newSkipped[agent.id]++; // Increment for others
+          }
+        });
+        return newSkipped;
       });
 
-
-      // 4. First agent generates a response
-      setNextAgentId(agent1Id);
-      setStatusMessage(`${agent1.name} is thinking...`);
-      const response1Text = await getAgentResponse(conversationAfterUser, agents, agent1Id, userName);
+      // 5. Generate agent response with enhanced context
+      setNextAgentId(nextSpeakerId);
+      setStatusMessage(`${nextSpeaker.name} is thinking...`);
       
-      const agent1Message: Message = {
-        agentId: agent1.id, agentName: agent1.name, text: response1Text, color: agent1.color,
+      const response = await getAgentResponse(
+        conversationAfterUser, 
+        agents, 
+        nextSpeakerId, 
+        userName
+      );
+      
+      const agentMessage: Message = {
+        agentId: nextSpeaker.id,
+        agentName: nextSpeaker.name,
+        text: response,
+        color: nextSpeaker.color,
       };
-      const conversationAfterAgent1 = [...conversationAfterUser, agent1Message];
-      setConversation(conversationAfterAgent1);
-
-      // 5. Second agent generates a response
-      setNextAgentId(agent2Id);
-      setStatusMessage(`${agent2.name} is thinking...`);
-      const response2Text = await getAgentResponse(conversationAfterAgent1, agents, agent2Id, userName);
-
-       const agent2Message: Message = {
-        agentId: agent2.id, agentName: agent2.name, text: response2Text, color: agent2.color,
-      };
-      setConversation(prev => [...prev, agent2Message]);
+      
+      setConversation(prev => [...prev, agentMessage]);
 
     } catch (error) {
       const errorMessage: Message = {
-          agentId: 'system',
-          agentName: 'System',
-          text: `An error occurred: ${error instanceof Error ? error.message : String(error)}. Please try again.`,
-          color: '#ef4444'
+        agentId: 'system',
+        agentName: 'System',
+        text: `An error occurred: ${error instanceof Error ? error.message : String(error)}. Please try again.`,
+        color: '#ef4444'
       };
       setConversation(prev => [...prev, errorMessage]);
     } finally {
@@ -235,6 +270,7 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
                   <div className="text-xs space-y-1 text-gray-400">
                     <p>Total Relevance: {score?.relevance ?? 0}</p>
                     <p>Total Context: {score?.context ?? 0}</p>
+                    <p>Combined Score: {(score?.relevance ?? 0) + (score?.context ?? 0)}</p>
                     <p>Skipped Turns: {skipped ?? 0}</p>
                   </div>
                 </div>
