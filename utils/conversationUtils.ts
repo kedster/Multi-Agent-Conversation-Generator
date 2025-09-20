@@ -14,22 +14,33 @@ export const detectMentionedAgents = (userMessage: string, agents: Agent[]): str
     
     // Check for direct name mentions (full name or first name)
     const nameParts = agentNameLower.split(' ');
-    const hasNameMention = nameParts.some(namePart => 
-      namePart.length > 2 && messageLower.includes(namePart)
-    );
+    const hasNameMention = nameParts.some(namePart => {
+      if (namePart.length < 3) return false;
+      
+      // Must be a word boundary mention, not just contained in another word
+      const wordBoundaryPattern = new RegExp(`\\b${namePart.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      return wordBoundaryPattern.test(userMessage);
+    });
     
     if (hasNameMention) {
       mentionedAgents.push(agent.id);
       continue;
     }
     
-    // Check for role mentions (e.g., "marketing expert", "developer")
-    const roleWords = agentRoleLower.split(' ');
-    const hasRoleMention = roleWords.some(word => 
-      word.length > 3 && messageLower.includes(word)
+    // Check for very specific role mentions that are clearly calling out the agent
+    const directRoleCallouts = [
+      'frontend engineer',
+      'backend engineer', 
+      'product manager',
+      'devops engineer',
+      'sre engineer'
+    ];
+    
+    const hasDirectRoleCallout = directRoleCallouts.some(callout => 
+      messageLower.includes(callout) && agentRoleLower.includes(callout.split(' ')[0])
     );
     
-    if (hasRoleMention) {
+    if (hasDirectRoleCallout) {
       mentionedAgents.push(agent.id);
       continue;
     }

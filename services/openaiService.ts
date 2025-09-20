@@ -199,7 +199,9 @@ Based on the history and agent roles, evaluate each agent's potential contributi
             throw new Error("No response content received from OpenAI");
         }
         
-        return JSON.parse(jsonText) as MonitorDecision;
+        // Clean up potential markdown formatting before parsing
+        const cleanedJsonText = jsonText.replace(/```json\n?/g, '').replace(/\n?```/g, '').trim();
+        return JSON.parse(cleanedJsonText) as MonitorDecision;
     } catch (error) {
         console.error("Error getting monitor decision:", error);
         throw new Error("Failed to get a decision from the monitor agent.");

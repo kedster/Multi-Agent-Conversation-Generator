@@ -47,7 +47,7 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
     return (cumulative.relevance + cumulative.context) + (currentScore.relevance + currentScore.context);
   };
 
-  // Function to determine the speakers with highest scores (1-2 speakers based on relevance)
+  // Function to determine the speakers with highest relevance (1-2 speakers based on relevance)
   const selectTopSpeakers = (
     scores: MonitorScore[], 
     agents: Agent[], 
@@ -56,77 +56,62 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
     lastSpeakerIds: string[],
     mentionedAgentIds: string[]
   ): [string, string?] => {
-    // Priority 1: Mentioned agents must speak if they have minimum relevance
-    const mentionedEligibleAgents = mentionedAgentIds.filter(agentId => {
-      const score = scores.find(s => s.agentId === agentId);
-      return score && score.relevance >= 3; // Lower threshold for mentioned agents
-    });
-    
-    // Priority 2: Include anyone who has skipped 2+ turns
-    const forcedSpeakers = agents.filter(a => skippedTurns[a.id] >= 2);
-    
-    // Priority 3: Avoid succession (same agent speaking consecutively)  
-    const eligibleAgents = agents.filter(a => !lastSpeakerIds.includes(a.id));
-    
-    // Calculate total scores for all agents, emphasizing current relevance
+    // Calculate relevance-focused scores for all agents
     const agentScores = agents.map(agent => {
       const currentScore = scores.find(s => s.agentId === agent.id);
-      const cumulative = cumulativeScores[agent.id] || { agentId: agent.id, relevance: 0, context: 0 };
-      
       if (!currentScore) return null;
       
-      // Weight current scores more heavily than cumulative for responsiveness
-      const currentWeight = 0.7;
-      const cumulativeWeight = 0.3;
+      const isMentioned = mentionedAgentIds.includes(agent.id);
+      const isForced = skippedTurns[agent.id] >= 2;
+      const wasRecentSpeaker = lastSpeakerIds.includes(agent.id);
       
-      const weightedRelevance = (currentScore.relevance * currentWeight) + (cumulative.relevance * cumulativeWeight);
-      const weightedContext = (currentScore.context * currentWeight) + (cumulative.context * cumulativeWeight);
-      const totalScore = weightedRelevance + weightedContext;
+      // Current relevance is the primary factor (80%), with context as secondary (20%)
+      const primaryScore = (currentScore.relevance * 0.8) + (currentScore.context * 0.2);
       
       return {
         agentId: agent.id,
-        totalScore,
+        primaryScore,
         currentRelevance: currentScore.relevance,
-        currentContext: currentScore.context,
-        isMentioned: mentionedEligibleAgents.includes(agent.id),
-        isForced: forcedSpeakers.some(fs => fs.id === agent.id),
-        isEligible: eligibleAgents.some(ea => ea.id === agent.id),
-        shouldSpeak: shouldAgentSpeak(currentScore.relevance, 4) // Only agents with relevance >= 4 should speak
+        isMentioned,
+        isForced,
+        wasRecentSpeaker,
+        // Agent can speak if: mentioned (rel>=3), forced (rel>=3), or high relevance (rel>=5)
+        canSpeak: isMentioned || isForced || currentScore.relevance >= 5
       };
     }).filter(Boolean);
 
-    // Sort by priority: mentioned first, then forced, then by relevance and total score
+    // Sort by: 1) mentioned first, 2) forced second, 3) by relevance score, 4) avoid recent speakers
     agentScores.sort((a, b) => {
+      // Mentioned agents get absolute priority
       if (a.isMentioned && !b.isMentioned) return -1;
       if (!a.isMentioned && b.isMentioned) return 1;
+      
+      // Then forced speakers
       if (a.isForced && !b.isForced) return -1;
       if (!a.isForced && b.isForced) return 1;
       
-      // Prioritize relevance heavily for conversation quality
-      if (Math.abs(a.currentRelevance - b.currentRelevance) >= 2) {
+      // Then by current relevance (most important factor)
+      if (Math.abs(a.currentRelevance - b.currentRelevance) >= 1) {
         return b.currentRelevance - a.currentRelevance;
       }
       
-      // Then by total score
-      if (a.totalScore !== b.totalScore) return b.totalScore - a.totalScore;
+      // Prefer agents who weren't recent speakers
+      if (a.wasRecentSpeaker && !b.wasRecentSpeaker) return 1;
+      if (!a.wasRecentSpeaker && b.wasRecentSpeaker) return -1;
       
-      // Finally by eligibility
-      if (a.isEligible && !b.isEligible) return -1;
-      if (!a.isEligible && b.isEligible) return 1;
-      return 0;
+      // Finally by primary score
+      return b.primaryScore - a.primaryScore;
     });
     
-    // Filter to only agents that should speak (unless forced or mentioned)
-    const speakingCandidates = agentScores.filter(agent => 
-      agent.shouldSpeak || agent.isForced || agent.isMentioned
-    );
+    // Filter to agents that can speak
+    const eligibleSpeakers = agentScores.filter(agent => agent.canSpeak);
     
-    // If no one meets the speaking criteria, allow the most relevant agent
-    const finalCandidates = speakingCandidates.length > 0 ? speakingCandidates : agentScores.slice(0, 1);
+    // If no one is eligible, allow the most relevant agent
+    const finalCandidates = eligibleSpeakers.length > 0 ? eligibleSpeakers : agentScores.slice(0, 1);
     
     const speaker1 = finalCandidates[0]?.agentId || agents[0].id;
     
-    // Only select second speaker if they're also highly relevant or if mentioned/forced
+    // Select second speaker only if they're highly relevant (>=6) or mentioned/forced
     let speaker2: string | undefined;
     if (finalCandidates.length > 1) {
       const candidate2 = finalCandidates[1];

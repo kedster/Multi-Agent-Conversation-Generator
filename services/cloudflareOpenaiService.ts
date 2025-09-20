@@ -30,8 +30,13 @@ async function callOpenAI(messages: any[], temperature: number = 0.8, maxTokens:
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Failed to parse error response' }));
-    throw new Error(errorData.error || `API request failed with status ${response.status}`);
+    let errorData;
+    try {
+      errorData = await response.json();
+    } catch (parseError) {
+      errorData = { error: 'Failed to parse error response' };
+    }
+    throw new Error(errorData.error || `OpenAI API request failed with status ${response.status}`);
   }
 
   return response.json();
@@ -162,7 +167,9 @@ Respond in JSON format only.`;
             throw new Error("No context summary generated");
         }
 
-        return JSON.parse(content) as ContextSummary;
+        // Clean up potential markdown formatting before parsing
+        const cleanedContent = content.replace(/```json\n?/g, '').replace(/\n?```/g, '').trim();
+        return JSON.parse(cleanedContent) as ContextSummary;
     } catch (error) {
         console.error("Error generating context summary:", error);
         // Fallback context
@@ -282,7 +289,9 @@ Select the agent with the highest combined score as the primary recommended spea
             throw new Error("No scorekeeper decision generated");
         }
 
-        const decision = JSON.parse(content) as MonitorDecision;
+        // Clean up potential markdown formatting before parsing
+        const cleanedContent = content.replace(/```json\n?/g, '').replace(/\n?```/g, '').trim();
+        const decision = JSON.parse(cleanedContent) as MonitorDecision;
         
         // Validate the response structure
         if (!decision.scores || !Array.isArray(decision.scores) || !decision.nextSpeakerAgentId || !decision.reasoning) {
@@ -292,19 +301,89 @@ Select the agent with the highest combined score as the primary recommended spea
         return decision;
     } catch (error) {
         console.error("Error getting scorekeeper decision:", error);
-        // Fallback with varied scores instead of all the same
-        const fallbackScores = agents.map((agent, index) => ({
-            agentId: agent.id,
-            relevance: 7 - index, // Varied scores 7,6,5,4
-            context: 6 - index,   // Varied scores 6,5,4,3  
-            engagement: 8 - index,
-            expertise: 5 + index
-        }));
+        // Fallback with context-aware scoring based on agent roles and user message
+        const userMessage = conversation.filter(msg => msg.isUser).pop()?.text || "";
+        const userMessageLower = userMessage.toLowerCase();
+        
+        const fallbackScores = agents.map((agent) => {
+            // Base score for all agents
+            let relevanceScore = 4;
+            
+            // Boost relevance based on keyword matching with agent roles
+            const agentRole = agent.role.toLowerCase();
+            const agentName = agent.name.toLowerCase();
+            
+            // Database/Backend related keywords - more precise matching
+            if (userMessageLower.includes('database') || userMessageLower.includes('data model') || 
+                userMessageLower.includes('optimization') || userMessageLower.includes('scale') ||
+                userMessageLower.includes('backend') || userMessageLower.includes('api')) {
+                if (agentRole.includes('backend') || agentName.includes('backend')) {
+                    relevanceScore = Math.min(10, relevanceScore + 5); // Backend engineer gets highest boost
+                } else if (agentRole.includes('devops') || agentRole.includes('sre')) {
+                    relevanceScore = Math.min(10, relevanceScore + 3); // DevOps gets moderate boost for performance
+                } else if (agentRole.includes('engineer')) {
+                    relevanceScore = Math.min(10, relevanceScore + 1); // Other engineers get small boost
+                }
+            }
+            
+            // Frontend related keywords
+            if (userMessageLower.includes('ui') || userMessageLower.includes('ux') || 
+                userMessageLower.includes('frontend') || userMessageLower.includes('component') ||
+                userMessageLower.includes('interface') || userMessageLower.includes('design')) {
+                if (agentRole.includes('frontend') || agentName.includes('frontend')) {
+                    relevanceScore = Math.min(10, relevanceScore + 5);
+                }
+            }
+            
+            // Product/Strategy related keywords
+            if (userMessageLower.includes('user') || userMessageLower.includes('business') ||
+                userMessageLower.includes('strategy') || userMessageLower.includes('feature') ||
+                userMessageLower.includes('product') || userMessageLower.includes('market')) {
+                if (agentRole.includes('product') || agentRole.includes('manager')) {
+                    relevanceScore = Math.min(10, relevanceScore + 4);
+                }
+            }
+            
+            // DevOps/Infrastructure related keywords
+            if (userMessageLower.includes('deploy') || userMessageLower.includes('infrastructure') || 
+                userMessageLower.includes('cloud') || userMessageLower.includes('monitoring') ||
+                userMessageLower.includes('devops') || userMessageLower.includes('security')) {
+                if (agentRole.includes('devops') || agentRole.includes('sre')) {
+                    relevanceScore = Math.min(10, relevanceScore + 5);
+                }
+            }
+            
+            // Performance is relevant to multiple roles but in different ways
+            if (userMessageLower.includes('performance')) {
+                if (agentRole.includes('backend') || agentName.includes('backend')) {
+                    relevanceScore = Math.min(10, relevanceScore + 3);
+                } else if (agentRole.includes('frontend') || agentName.includes('frontend')) {
+                    relevanceScore = Math.min(10, relevanceScore + 2);
+                } else if (agentRole.includes('devops') || agentRole.includes('sre')) {
+                    relevanceScore = Math.min(10, relevanceScore + 2);
+                }
+            }
+            
+            // Add small random variation to prevent ties and monotony
+            const randomVariation = Math.floor(Math.random() * 2); // 0 or 1
+            relevanceScore = Math.max(1, Math.min(10, relevanceScore + randomVariation));
+            
+            return {
+                agentId: agent.id,
+                relevance: relevanceScore,
+                context: Math.max(1, relevanceScore - 1),
+                engagement: Math.max(1, relevanceScore),
+                expertise: Math.max(1, relevanceScore)
+            };
+        });
+        
+        // Sort fallback by relevance to ensure most relevant agents are prioritized
+        fallbackScores.sort((a, b) => b.relevance - a.relevance);
         
         return {
             scores: fallbackScores,
-            reasoning: "Fallback scoring with variation due to API error",
-            nextSpeakerAgentId: agents[0].id
+            reasoning: "Fallback scoring with context-aware relevance matching due to API error",
+            nextSpeakerAgentId: fallbackScores[0].agentId // Most relevant agent
         };
     }
 };
