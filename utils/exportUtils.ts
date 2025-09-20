@@ -102,27 +102,60 @@ export const downloadHtml = (fullHtml: string, fileName: string) => {
 
 export const downloadPdf = async (element: HTMLElement, fileName: string) => {
   try {
+    // Wait a bit to ensure the iframe content is fully loaded
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
     const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
+        allowTaint: true,
         backgroundColor: null, // Let the body background from the theme show through
         scrollX: 0,
-        scrollY: -window.scrollY,
-        windowWidth: document.documentElement.offsetWidth,
-        windowHeight: document.documentElement.offsetHeight,
+        scrollY: 0,
+        windowWidth: element.scrollWidth,
+        windowHeight: element.scrollHeight,
+        width: element.scrollWidth,
+        height: element.scrollHeight,
     });
+    
     const imgData = canvas.toDataURL('image/png');
     
+    // Calculate appropriate PDF dimensions
+    const imgWidth = canvas.width;
+    const imgHeight = canvas.height;
+    
+    // Use A4 proportions but scale to fit content
+    const pdfWidth = Math.min(imgWidth, 2480); // Max width for reasonable file size
+    const pdfHeight = (imgHeight * pdfWidth) / imgWidth;
+    
     const pdf = new jsPDF({
-      orientation: 'portrait',
+      orientation: pdfHeight > pdfWidth ? 'portrait' : 'landscape',
       unit: 'px',
-      format: [canvas.width, canvas.height]
+      format: [pdfWidth, pdfHeight]
     });
 
-    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
     pdf.save(`${fileName}.pdf`);
+    
+    return true; // Success indicator
   } catch (error) {
     console.error("Error generating PDF:", error);
-    alert("Could not generate PDF. Please try again.");
+    
+    // More specific error messages
+    let errorMessage = "Could not generate PDF. ";
+    if (error instanceof Error) {
+      if (error.message.includes('canvas')) {
+        errorMessage += "There was an issue capturing the content. Please try again.";
+      } else if (error.message.includes('CORS')) {
+        errorMessage += "Security restrictions prevented PDF generation. Please try downloading as HTML instead.";
+      } else {
+        errorMessage += `Error: ${error.message}`;
+      }
+    } else {
+      errorMessage += "Please try again or download as HTML instead.";
+    }
+    
+    alert(errorMessage);
+    return false; // Failure indicator
   }
 };

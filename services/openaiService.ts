@@ -33,6 +33,70 @@ function formatConversationHistory(conversation: Message[], userName: string): s
     ).join('\n');
 }
 
+function analyzeUserEngagement(conversation: Message[], userName: string): {
+    userMessages: Message[];
+    userFocusedAgents: string[];
+    userPriorities: string[];
+    userIntent: string;
+} {
+    const userMessages = conversation.filter(msg => msg.isUser);
+    
+    // Analyze which agents the user responded to most
+    const agentInteractions = new Map<string, number>();
+    const userPriorities: string[] = [];
+    
+    for (let i = 0; i < conversation.length; i++) {
+        const msg = conversation[i];
+        if (msg.isUser && i > 0) {
+            // Check who the user was responding to
+            const previousMsg = conversation[i - 1];
+            if (!previousMsg.isUser) {
+                const count = agentInteractions.get(previousMsg.agentName) || 0;
+                agentInteractions.set(previousMsg.agentName, count + 1);
+            }
+        }
+        
+        // Extract priorities and key topics from user messages
+        if (msg.isUser) {
+            const text = msg.text.toLowerCase();
+            // Look for priority indicators
+            if (text.includes('important') || text.includes('priority') || text.includes('focus') || 
+                text.includes('key') || text.includes('critical') || text.includes('main')) {
+                userPriorities.push(msg.text);
+            }
+        }
+    }
+    
+    // Sort agents by interaction frequency
+    const userFocusedAgents = Array.from(agentInteractions.entries())
+        .sort(([,a], [,b]) => b - a)
+        .map(([agent]) => agent);
+    
+    // Determine overall user intent from their messages
+    const allUserText = userMessages.map(msg => msg.text).join(' ');
+    let userIntent = "The user participated in the discussion";
+    
+    if (userMessages.length > 0) {
+        const firstUserMsg = userMessages[0].text.toLowerCase();
+        const lastUserMsg = userMessages[userMessages.length - 1].text.toLowerCase();
+        
+        if (firstUserMsg.includes('want') || firstUserMsg.includes('need') || firstUserMsg.includes('looking for')) {
+            userIntent = `The user's main goal: ${userMessages[0].text}`;
+        } else if (userPriorities.length > 0) {
+            userIntent = `The user emphasized: ${userPriorities[0]}`;
+        } else if (userMessages.length >= 3) {
+            userIntent = `The user actively engaged with focus on: ${userFocusedAgents[0] || 'multiple perspectives'}`;
+        }
+    }
+    
+    return {
+        userMessages,
+        userFocusedAgents,
+        userPriorities,
+        userIntent
+    };
+}
+
 function formatAgentProfiles(agents: Agent[]): string {
     return agents.map(agent => 
         `Agent ID: ${agent.id}\nName: ${agent.name}\nRole: ${agent.role}`
@@ -217,18 +281,32 @@ PERSONALITY TRAITS: You are direct, argumentative when necessary, and protective
     }
 };
 
-const getExportReportPrompt = (conversationHistory: string, service: Service, userName: string): string => {
+const getExportReportPrompt = (conversationHistory: string, service: Service, userName: string, conversation: Message[]): string => {
+    const userEngagement = analyzeUserEngagement(conversation, userName);
+    
     const commonInstructions = `
 You are an expert executive assistant tasked with synthesizing a discussion into an actionable, professional report.
 Your output MUST be a standalone professional document, formatted in clean HTML. It IS NOT a summary of a conversation.
-CRITICAL INSTRUCTIONS:
+
+CRITICAL INSTRUCTIONS FOR USER-CENTERED REPORTING:
+- PRIORITIZE the user's (${userName}) input, goals, and priorities above all else
+- Structure the report around what the user cared about most, not just chronological order
+- User Intent: ${userEngagement.userIntent}
+- User's Key Priorities: ${userEngagement.userPriorities.length > 0 ? userEngagement.userPriorities.join('; ') : 'General participation'}
+- Agents the user engaged with most: ${userEngagement.userFocusedAgents.length > 0 ? userEngagement.userFocusedAgents.slice(0, 3).join(', ') : 'Various agents'}
+
+SYNTHESIS GUIDELINES:
 - DO NOT include a transcript, chat logs, or direct back-and-forth dialogue.
 - DO NOT mention the AI agent names (e.g., 'Alex Frontend Engineer', 'Brenda Backend Engineer').
 - DO NOT refer to the user by name in the body of the report (e.g. "${userName} said..."). You may list participants in an 'Attendees' section if appropriate for the format, where you can list "${userName} (User)".
-- Synthesize the key points, decisions, arguments, and outcomes into a cohesive, professional document.
+- SYNTHESIZE the discussion by organizing points around the user's priorities and interests
+- FOCUS on the topics and agents that the user engaged with most actively
 - The final document must be immediately usable and understandable by a stakeholder who was NOT present at the meeting.
 - The HTML should be a single block that can be embedded inside a styled container. Do not include <html> or <body> tags.
 - Use <h2> for the main title and <h3> for section titles. Use <p>, <ul>, <li>, and <strong> for clear structure.
+
+USER'S KEY CONTRIBUTIONS TO HIGHLIGHT:
+${userEngagement.userMessages.map(msg => `• ${msg.text}`).join('\n')}
 
 Conversation Transcript to be Synthesized:
 ${conversationHistory}
@@ -240,26 +318,28 @@ Generate the HTML report based on the specific instructions for the theme "${ser
         case 'dev':
             return `${commonInstructions}
             **Theme: Software Development Meeting Report**
-            - **Format:** Formal Meeting Minutes.
+            - **Format:** Formal Meeting Minutes structured around user priorities.
             - **Main Title:** "Meeting Minutes: ${service.name}"
+            - **PRIORITIZATION:** Focus on the technical challenges and solutions that the user emphasized or engaged with most.
             - **Sections:**
-                1.  "<h3>Attendees</h3>" (List the agent roles like 'Principal Frontend Engineer', 'Staff Backend Engineer', etc., and '${userName} (User)').
-                2.  "<h3>Problem Overview</h3>" (Synthesize the core technical or product challenge discussed).
-                3.  "<h3>Solution Analysis</h3>" (Detail the proposed solutions. For each, synthesize the pros, cons, and key discussion points raised by the team).
-                4.  "<h3>Decision & Rationale</h3>" (Clearly state the final decision that was reached).
-                5.  "<h3>Action Items</h3>" (Create a bulleted list of concrete next steps, assigning ownership to roles, e.g., "Backend Team: ...").
+                1.  "<h3>Meeting Participants</h3>" (List the agent roles like 'Principal Frontend Engineer', 'Staff Backend Engineer', etc., and '${userName} (User)').
+                2.  "<h3>Primary Objectives</h3>" (Start with what the user wanted to achieve or the problems they prioritized).
+                3.  "<h3>Technical Discussion & Analysis</h3>" (Organize the technical solutions around user priorities - put solutions the user engaged with most at the forefront).
+                4.  "<h3>Consensus & Decision</h3>" (Focus on decisions that align with user priorities and address their main concerns).
+                5.  "<h3>Action Plan</h3>" (Create a bulleted list of concrete next steps that directly address what the user cared about most, assigning ownership to roles).
             `;
         case 'mkt':
             return `${commonInstructions}
             **Theme: Marketing Campaign Brief**
-            - **Format:** A concise, vibrant, and actionable campaign brief.
+            - **Format:** A concise, actionable campaign brief organized around user priorities.
             - **Main Title:** "Campaign Brief: ${service.name}"
+            - **PRIORITIZATION:** Center the brief around what the user wanted to achieve and the marketing approaches they favored.
             - **Sections:**
-                1.  "<h3>Executive Summary</h3>" (A one-paragraph overview of the campaign's goal and approach).
-                2.  "<h3>Core Objective</h3>" (What is the single most important goal of this campaign?).
-                3.  "<h3>Strategic Approach</h3>" (Synthesize the team's discussion into a cohesive strategy, blending different viewpoints like brand, performance, and content).
-                4.  "<h3>Key Initiatives</h3>" (Bulleted list of the main activities, e.g., 'Pillar Content Page Creation', 'Paid Social Video Campaign', 'Community Engagement Program').
-                5.  "<h3>Success Metrics</h3>" (List the agreed-upon KPIs, e.g., 'LTV:CAC Ratio', 'Cost-Per-Acquisition Target').
+                1.  "<h3>Campaign Vision</h3>" (Lead with the user's goals and vision for the campaign).
+                2.  "<h3>Core Strategy</h3>" (Synthesize the discussion into a strategy that prioritizes user preferences and concerns).
+                3.  "<h3>Key Initiatives</h3>" (Emphasize the initiatives the user engaged with most, e.g., 'Content Strategy', 'Paid Advertising', 'Community Building').
+                4.  "<h3>Success Framework</h3>" (Focus on metrics and outcomes that align with user priorities).
+                5.  "<h3>Implementation Roadmap</h3>" (Outline steps that directly address user concerns and priorities).
             `;
         case 'bio':
             return `${commonInstructions}
@@ -305,7 +385,7 @@ Generate the HTML report based on the specific instructions for the theme "${ser
 
 export const generateExportReport = async (conversation: Message[], service: Service, userName: string): Promise<string> => {
     const conversationHistory = formatConversationHistory(conversation, userName);
-    const prompt = getExportReportPrompt(conversationHistory, service, userName);
+    const prompt = getExportReportPrompt(conversationHistory, service, userName, conversation);
 
     try {
         const response = await getOpenAI().chat.completions.create({
@@ -313,7 +393,7 @@ export const generateExportReport = async (conversation: Message[], service: Ser
             messages: [
                 {
                     role: "system",
-                    content: "You are an expert executive assistant. Generate clean, professional HTML reports."
+                    content: "You are an expert executive assistant. Generate clean, professional HTML reports that prioritize the user's input and intentions above all else."
                 },
                 {
                     role: "user",
