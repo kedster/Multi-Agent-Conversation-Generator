@@ -12,8 +12,13 @@ export const detectMentionedAgents = (userMessage: string, agents: Agent[]): str
     const agentNameLower = agent.name.toLowerCase();
     const agentRoleLower = agent.role.toLowerCase();
     
-    // Check for direct name mentions
-    if (messageLower.includes(agentNameLower)) {
+    // Check for direct name mentions (full name or first name)
+    const nameParts = agentNameLower.split(' ');
+    const hasNameMention = nameParts.some(namePart => 
+      namePart.length > 2 && messageLower.includes(namePart)
+    );
+    
+    if (hasNameMention) {
       mentionedAgents.push(agent.id);
       continue;
     }
@@ -29,15 +34,17 @@ export const detectMentionedAgents = (userMessage: string, agents: Agent[]): str
       continue;
     }
     
-    // Check for common call-out phrases
+    // Check for common call-out phrases using first name
+    const firstName = nameParts[0];
     const callOutPatterns = [
-      `${agentNameLower}`,
-      `to ${agentNameLower}`,
-      `ask ${agentNameLower}`,
-      `${agentNameLower} what`,
-      `${agentNameLower} can`,
-      `${agentNameLower} please`,
-      `@${agentNameLower}`
+      `to ${firstName}`,
+      `ask ${firstName}`,
+      `${firstName} what`,
+      `${firstName} can`,
+      `${firstName} please`,
+      `@${firstName}`,
+      `hey ${firstName}`,
+      `${firstName},`
     ];
     
     const hasCallOut = callOutPatterns.some(pattern => 
