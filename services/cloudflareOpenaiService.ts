@@ -250,11 +250,15 @@ Rate each agent (1-10) on these criteria:
 3. **Engagement**: How likely is this agent to provide valuable insights for this topic?
 4. **Expertise**: What level of domain knowledge does this agent have for this specific question?
 
-IMPORTANT: 
-- Give realistic varied scores (not all agents should have the same score)
-- Consider the specific context of what the user is asking
-- The two highest total scoring agents will speak next
-- Base scores on actual relevance to the conversation topic
+IMPORTANT SCORING GUIDELINES: 
+- Give realistic varied scores based on actual relevance to the user's specific message
+- Agents with low relevance (< 4) should primarily contribute to scoring/analysis rather than speaking
+- Only agents with high relevance (6+) to the current topic should be primary speakers
+- Consider the specific context of what the user is asking, not general capabilities
+- The system will select 1-2 most relevant agents to respond based on these scores
+- Be honest about relevance - not every agent needs to speak on every topic
+
+Focus on RELEVANCE TO THE USER'S CURRENT MESSAGE above all other factors.
 
 Select the agent with the highest combined score as the primary recommended speaker.`;
 
