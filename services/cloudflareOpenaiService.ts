@@ -58,6 +58,60 @@ interface MonitorDecision {
     nextSpeakerAgentId: string;
 }
 
+interface ContextSummary {
+    summary: string;
+    keyPoints: string[];
+    userIntent: string;
+}
+
+// Generate conversation context summary for agent responses
+export const generateConversationContext = async (
+    conversation: Message[], 
+    userName: string
+): Promise<ContextSummary> => {
+    const conversationHistory = formatConversationHistory(conversation, userName);
+    
+    const prompt = `Analyze the following conversation and provide a context summary for AI agents to use in their responses.
+
+Conversation History:
+${conversationHistory}
+
+Generate a JSON response with:
+1. "summary": A concise summary of the conversation so far (2-3 sentences)
+2. "keyPoints": Array of 3-5 key discussion points or topics
+3. "userIntent": What the user seems to want or is asking for
+
+Respond in JSON format only.`;
+
+    try {
+        const response = await callOpenAI([
+            {
+                role: "system",
+                content: "You are a conversation analyst. Always respond with valid JSON."
+            },
+            {
+                role: "user", 
+                content: prompt
+            }
+        ], 0.3, 300);
+
+        const content = response.choices[0].message.content;
+        if (!content) {
+            throw new Error("No context summary generated");
+        }
+
+        return JSON.parse(content) as ContextSummary;
+    } catch (error) {
+        console.error("Error generating context summary:", error);
+        // Fallback context
+        return {
+            summary: "Ongoing conversation with multiple agents",
+            keyPoints: ["General discussion"],
+            userIntent: "Seeking information and dialogue"
+        };
+    }
+};
+
 // JSON Schema for OpenAI function calling
 const monitorDecisionSchema = {
     type: "object",
@@ -74,6 +128,12 @@ const monitorDecisionSchema = {
                         maximum: 10,
                         description: "How relevant is this agent to the current conversation topic (1-10)"
                     },
+                    context: {
+                        type: "number",
+                        minimum: 1,
+                        maximum: 10,
+                        description: "How well this agent can build on the conversation context (1-10)"
+                    },
                     engagement: { 
                         type: "number", 
                         minimum: 1, 
@@ -87,7 +147,7 @@ const monitorDecisionSchema = {
                         description: "How much expertise this agent has on the current topic (1-10)"
                     }
                 },
-                required: ["agentId", "relevance", "engagement", "expertise"]
+                required: ["agentId", "relevance", "context", "engagement", "expertise"]
             }
         },
         reasoning: { 
@@ -102,89 +162,144 @@ const monitorDecisionSchema = {
     required: ["scores", "reasoning", "nextSpeakerAgentId"]
 };
 
-export const getNextSpeaker = async (
-    conversation: Message[], 
-    agents: Agent[], 
-    userName: string
+// Dedicated AI Scorekeeper - Fifth agent that rates all agents based on context
+export const getScorekeeper = async (
+    conversation: Message[],
+    agents: Agent[],
+    userName: string,
+    userLatestMessage: string
 ): Promise<MonitorDecision> => {
     const conversationHistory = formatConversationHistory(conversation, userName);
     const agentProfiles = formatAgentProfiles(agents);
     
-    const prompt = `You are a conversation monitor for a multi-agent discussion. Your job is to decide which agent should speak next based on the current conversation context and each agent's expertise and engagement level.
+    const prompt = `You are a dedicated AI Scorekeeper for a multi-agent conversation system. Your job is to analyze the conversation and rate each agent based on how well they can contribute to the user's specific needs.
 
-Current Conversation:
+User's Latest Message: "${userLatestMessage}"
+
+Conversation History:
 ${conversationHistory}
 
 Available Agents:
 ${agentProfiles}
 
-Analyze the conversation and rate each agent on:
-1. Relevance (1-10): How relevant is this agent to the current topic?
-2. Engagement (1-10): How engaged/interested would this agent be?
-3. Expertise (1-10): How much expertise does this agent have on the topic?
+Rate each agent (1-10) on these criteria:
+1. **Relevance**: How relevant is this agent's expertise to the user's current question/need?
+2. **Context**: How well can this agent build upon the existing conversation context?
+3. **Engagement**: How likely is this agent to provide valuable insights for this topic?
+4. **Expertise**: What level of domain knowledge does this agent have for this specific question?
 
-Then select the best agent to speak next and provide reasoning.
+IMPORTANT: 
+- Give realistic varied scores (not all agents should have the same score)
+- Consider the specific context of what the user is asking
+- The two highest total scoring agents will speak next
+- Base scores on actual relevance to the conversation topic
 
-Respond ONLY with valid JSON matching the required schema.`;
+Select the agent with the highest combined score as the primary recommended speaker.`;
 
     try {
         const response = await callOpenAI([
             {
                 role: "system",
-                content: "You are a conversation monitor. Respond only with valid JSON."
+                content: "You are an expert conversation analyst and scorekeeper. Always provide detailed, varied scoring based on actual context relevance. Respond with valid JSON according to the schema."
             },
             {
                 role: "user",
                 content: prompt
             }
-        ], 0.3, 800, { type: "json_object" });
-        
+        ], 0.7, 800, {
+            type: "json_object",
+            schema: monitorDecisionSchema
+        });
+
         const content = response.choices[0].message.content;
         if (!content) {
-            throw new Error("No response content received from OpenAI");
+            throw new Error("No scorekeeper decision generated");
         }
-        
-        const decision = JSON.parse(content);
+
+        const decision = JSON.parse(content) as MonitorDecision;
         
         // Validate the response structure
         if (!decision.scores || !Array.isArray(decision.scores) || !decision.nextSpeakerAgentId || !decision.reasoning) {
-            throw new Error("Invalid response structure from OpenAI");
+            throw new Error("Invalid scorekeeper response structure");
         }
         
         return decision;
     } catch (error) {
-        console.error("Error getting next speaker:", error);
-        // Fallback: return the first agent
-        const fallbackScores = agents.map(agent => ({
+        console.error("Error getting scorekeeper decision:", error);
+        // Fallback with varied scores instead of all the same
+        const fallbackScores = agents.map((agent, index) => ({
             agentId: agent.id,
-            relevance: 5,
-            engagement: 5,
-            expertise: 5
+            relevance: 7 - index, // Varied scores 7,6,5,4
+            context: 6 - index,   // Varied scores 6,5,4,3  
+            engagement: 8 - index,
+            expertise: 5 + index
         }));
         
         return {
             scores: fallbackScores,
-            reasoning: "Fallback selection due to API error",
+            reasoning: "Fallback scoring with variation due to API error",
             nextSpeakerAgentId: agents[0].id
         };
     }
 };
 
+export const getNextSpeaker = async (
+    conversation: Message[], 
+    agents: Agent[], 
+    userName: string,
+    cumulativeScores?: Record<string, MonitorScore>,
+    skippedTurns?: Record<string, number>
+): Promise<MonitorDecision> => {
+    // Get the user's latest message for context
+    const userMessages = conversation.filter(msg => msg.isUser);
+    const latestUserMessage = userMessages[userMessages.length - 1]?.text || "";
+    
+    // Use the dedicated scorekeeper for more accurate scoring
+    return await getScorekeeper(conversation, agents, userName, latestUserMessage);
+};
+
 export const getAgentResponse = async (
     agent: Agent, 
     conversation: Message[], 
-    userName: string
+    userName: string,
+    contextSummary?: ContextSummary
 ): Promise<string> => {
     const conversationHistory = formatConversationHistory(conversation, userName);
     
-    const prompt = `You are participating in a multi-agent conversation simulation. Here is the conversation so far:
+    // Generate context summary if not provided
+    const context = contextSummary || await generateConversationContext(conversation, userName);
+    
+    // Extract recent agent responses for context
+    const recentResponses = conversation
+        .filter(msg => !msg.isUser)
+        .slice(-3) // Last 3 agent responses
+        .map(msg => `${msg.agentName}: ${msg.text.slice(0, 200)}${msg.text.length > 200 ? '...' : ''}`)
+        .join('\n');
+    
+    const contextualPrompt = `You are participating in a multi-agent conversation simulation. Here is the conversation context and your character details:
 
+CONVERSATION CONTEXT:
+Summary: ${context.summary}
+Key Discussion Points: ${context.keyPoints.join(', ')}
+User Intent: ${context.userIntent}
+
+RECENT AGENT RESPONSES (for context):
+${recentResponses || 'No recent agent responses'}
+
+FULL CONVERSATION HISTORY:
 ${conversationHistory}
 
-Your character details:
+YOUR CHARACTER DETAILS:
 - Name: ${agent.name}
 - Role: ${agent.role}
 - Starting Context: ${agent.startingContext}
+
+RESPONSE GUIDELINES:
+1. Build on the conversation context and previous agent responses
+2. Address the user's intent while staying true to your character
+3. Reference or respond to relevant points made by other agents
+4. Be natural and conversational while maintaining your expertise
+5. Keep responses focused and relevant (aim for 2-4 sentences)
 
 CRITICAL COMMUNICATION STYLE REQUIREMENTS:
 - Be direct, sharp, and to-the-point - no fluff or unnecessary pleasantries
@@ -195,17 +310,6 @@ CRITICAL COMMUNICATION STYLE REQUIREMENTS:
 - Be somewhat argumentative and opinionated - you have strong professional convictions
 - Don't compromise easily on things that matter to your area of expertise
 - Show your personality: analytical, protective of quality, efficiency-focused
-- Use professional language but with clear emotional investment in good outcomes
-
-Guidelines:
-- Stay in character based on your detailed role and professional background
-- Respond naturally to the conversation flow with your specific expertise
-- Reference previous messages when relevant, especially to argue against poor suggestions
-- Keep responses concise but impactful (2-4 sentences typically with strong opinions)
-- Don't repeat what others have already said - add your unique professional perspective
-- Show frustration with inefficient or poorly thought-out suggestions
-- Be the expert in your domain - argue from authority and experience
-
 It is now your turn to speak. As ${agent.name}, continue the conversation naturally. Refer to the user as ${userName} when appropriate. Be direct, opinionated, and don't hesitate to push back on ideas you disagree with. Provide only your response, without your name or any preamble. Your response should be a single, coherent message that shows your professional expertise and strong opinions.
 `;
 
@@ -219,7 +323,7 @@ PERSONALITY TRAITS: You are direct, argumentative when necessary, and protective
             },
             {
                 role: "user",
-                content: prompt
+                content: contextualPrompt
             }
         ], 0.8, 500);
         

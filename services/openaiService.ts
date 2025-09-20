@@ -83,7 +83,9 @@ export const getMonitorDecision = async (
     conversation: Message[], 
     agents: Agent[],
     userName: string,
-    agentToExcludeId?: string
+    agentToExcludeId?: string,
+    cumulativeScores?: Record<string, MonitorScore>,
+    skippedTurns?: Record<string, number>
 ): Promise<MonitorDecision | null> => {
     const conversationHistory = formatConversationHistory(conversation, userName);
     const agentProfiles = formatAgentProfiles(agents);
@@ -140,7 +142,13 @@ Based on the history and agent roles, evaluate each agent's potential contributi
     }
 };
 
-export const getAgentResponse = async (conversation: Message[], agents: Agent[], agentId: string, userName: string): Promise<string> => {
+export const getAgentResponse = async (
+    conversation: Message[], 
+    agents: Agent[], 
+    agentId: string, 
+    userName: string,
+    contextSummary?: any
+): Promise<string> => {
     const agent = agents.find(a => a.id === agentId);
     if (!agent) {
         throw new Error(`Agent with ID ${agentId} not found.`);

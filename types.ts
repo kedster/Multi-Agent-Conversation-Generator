@@ -27,6 +27,23 @@ export interface MonitorScore {
   agentId: string;
   relevance: number;
   context: number;
+  engagement?: number;
+  expertise?: number;
+}
+
+export interface AgentScore {
+  agentId: string;
+  cumulativeScore: number;
+  responseScore: number;
+  totalScore: number;
+  contextRelevance: number;
+}
+
+export interface ConversationContext {
+  summary: string;
+  keyPoints: string[];
+  lastSpeaker?: string;
+  userIntent: string;
 }
 
 export enum Screen {

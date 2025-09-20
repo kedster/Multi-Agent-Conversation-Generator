@@ -18,11 +18,13 @@ async function cloudflareGetMonitorDecision(
   conversation: any[], 
   agents: any[],
   userName: string,
-  agentToExcludeId?: string
+  agentToExcludeId?: string,
+  cumulativeScores?: Record<string, any>,
+  skippedTurns?: Record<string, number>
 ) {
   // For now, we'll ignore the agentToExcludeId parameter in the Cloudflare version
   // This could be enhanced later to support exclusion
-  return await cloudflareService.getNextSpeaker(conversation, agents, userName);
+  return await cloudflareService.getNextSpeaker(conversation, agents, userName, cumulativeScores, skippedTurns);
 }
 
 // Wrapper function to match the original getAgentResponse interface
@@ -30,13 +32,14 @@ async function cloudflareGetAgentResponse(
   conversation: any[],
   agents: any[],
   agentId: string,
-  userName: string
+  userName: string,
+  contextSummary?: any
 ) {
   const agent = agents.find((a: any) => a.id === agentId);
   if (!agent) {
     throw new Error(`Agent with ID ${agentId} not found.`);
   }
-  return await cloudflareService.getAgentResponse(agent, conversation, userName);
+  return await cloudflareService.getAgentResponse(agent, conversation, userName, contextSummary);
 }
 
 // Export the appropriate service functions
@@ -51,5 +54,10 @@ export const getAgentResponse = isCloudflarePages
 export const generateExportReport = isCloudflarePages 
   ? cloudflareService.generateExportReport 
   : originalService.generateExportReport;
+
+// Export the new scorekeeper function for direct access
+export const getScorekeeper = isCloudflarePages 
+  ? cloudflareService.getScorekeeper
+  : originalService.getMonitorDecision; // Fallback to original for now
 
 export { isCloudflarePages };
