@@ -15,6 +15,7 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ conversation, onStartNew, u
   const [fileName, setFileName] = useState(`${service.name.toLowerCase().replace(/ /g, '-')}-report-${new Date().toISOString().split('T')[0]}`);
   const [fullReportHtml, setFullReportHtml] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(true);
+  const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
   const previewRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -41,9 +42,24 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ conversation, onStartNew, u
     }
   };
 
-  const handleDownloadPDF = () => {
-    if (previewRef.current?.contentWindow?.document?.body) {
-      downloadPdf(previewRef.current.contentWindow.document.body, fileName);
+  const handleDownloadPDF = async () => {
+    if (!previewRef.current?.contentWindow?.document?.body) {
+      alert("Report preview is not ready yet. Please wait for the report to fully load and try again.");
+      return;
+    }
+    
+    setIsExportingPdf(true);
+    try {
+      const success = await downloadPdf(previewRef.current.contentWindow.document.body, fileName);
+      if (!success) {
+        // Error was already shown in downloadPdf function
+        console.log("PDF export failed");
+      }
+    } catch (error) {
+      console.error("Unexpected error during PDF export:", error);
+      alert("An unexpected error occurred. Please try again or download as HTML instead.");
+    } finally {
+      setIsExportingPdf(false);
     }
   };
 
@@ -70,8 +86,8 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ conversation, onStartNew, u
                         className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                         />
                     </div>
-                    <button onClick={handleDownloadPDF} disabled={isGenerating || !fullReportHtml} className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                        <DownloadIcon /> Download PDF
+                    <button onClick={handleDownloadPDF} disabled={isGenerating || !fullReportHtml || isExportingPdf} className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        <DownloadIcon /> {isExportingPdf ? 'Generating PDF...' : 'Download PDF'}
                     </button>
                     <button onClick={handleDownloadHTML} disabled={isGenerating || !fullReportHtml} className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                         <FileCodeIcon /> Download HTML
