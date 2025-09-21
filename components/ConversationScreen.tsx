@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { Agent, Message, MonitorScore, Service } from '../types';
-import { getNextSpeaker, getAgentResponse } from '../services';
+import type { Agent, Message, MonitorScore, Service, AgentTokenStats } from '../types';
+import { getNextSpeaker, getAgentResponseWithTokens } from '../services';
 import { UserIcon, SendIcon, FileExportIcon } from './icons';
 import { detectMentionedAgents, shouldAgentSpeak, selectTopSpeakers } from '../utils/conversationUtils';
+import { globalTokenTracker } from '../utils/tokenTracker';
+import { globalCheckpointManager, CHECKPOINT_CONFIG } from '../utils/checkpointManager';
+import { generateFallbackScores } from '../utils/fallbackScoring';
+import TokenUsageDisplay from './TokenUsageDisplay';
 
 interface ConversationScreenProps {
   agents: Agent[];
@@ -27,14 +31,33 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
   );
   const [nextAgentId, setNextAgentId] = useState<string | null>(null);
   const [mentionedAgents, setMentionedAgents] = useState<string[]>([]);
+  const [tokenStats, setTokenStats] = useState<AgentTokenStats[]>([]);
+  const [totalCost, setTotalCost] = useState<number>(0);
+  const [totalTokens, setTotalTokens] = useState<number>(0);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Update token statistics
+  const updateTokenStats = () => {
+    const stats = globalTokenTracker.getAllStats();
+    const totalCostValue = globalTokenTracker.getTotalCost();
+    const totalTokensValue = globalTokenTracker.getTotalTokens();
+    
+    setTokenStats(stats);
+    setTotalCost(totalCostValue);
+    setTotalTokens(totalTokensValue);
+  };
 
   useEffect(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [conversation]);
+
+  // Reset checkpoint manager when conversation is reset
+  useEffect(() => {
+    globalCheckpointManager.reset();
+  }, [initialConversation]);
 
   // Function to calculate total score for an agent
   const calculateTotalScore = (agentId: string, currentScores: MonitorScore[], cumulativeScores: Record<string, MonitorScore>) => {
@@ -76,16 +99,37 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
         .slice(-2)
         .map(msg => msg.agentId);
 
-      // 1. Monitor analyzes conversation and scores all agents
-      setStatusMessage('Monitor is analyzing conversation context...');
-      const monitorDecision = await getNextSpeaker(
-        conversationAfterUser, 
-        agents, 
-        userName, 
-        undefined, // agentToExcludeId - not used in our new system
-        cumulativeScores,
-        skippedTurns
-      );
+      // 1. Check if we should use ScoreKeeper (checkpoint-based) or fallback scoring
+      const shouldUseScoreKeeper = globalCheckpointManager.shouldCallScoreKeeper(conversationAfterUser, false);
+      let monitorDecision;
+      
+      if (shouldUseScoreKeeper) {
+        // Use ScoreKeeper at checkpoints
+        setStatusMessage('Monitor is analyzing conversation context...');
+        monitorDecision = await getNextSpeaker(
+          conversationAfterUser, 
+          agents, 
+          userName, 
+          undefined, // agentToExcludeId - not used in our new system
+          cumulativeScores,
+          skippedTurns
+        );
+
+        // Track ScoreKeeper token usage if available
+        if (monitorDecision.tokenUsage) {
+          globalTokenTracker.trackUsage('scorekeeper', 'ScoreKeeper', monitorDecision.tokenUsage);
+          updateTokenStats();
+        }
+      } else {
+        // Use fallback scoring for cost efficiency
+        setStatusMessage('Using cached scoring for efficiency...');
+        const fallbackResult = generateFallbackScores(conversationAfterUser, agents, userName, cumulativeScores);
+        monitorDecision = {
+          scores: fallbackResult.scores,
+          reasoning: fallbackResult.reasoning,
+          nextSpeakerAgentId: fallbackResult.nextSpeakerAgentId
+        };
+      }
 
       if (!monitorDecision || !monitorDecision.scores) {
         throw new Error("Invalid response from monitor agent.");
@@ -145,42 +189,58 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
         setStatusMessage(`${speaker1.name} and ${speaker2.name} are thinking...`);
         
         // Parallel API calls for both agents to maintain separate context
-        const [response1, response2] = await Promise.all([
-          getAgentResponse(conversationAfterUser, agents, speaker1Id, userName),
-          getAgentResponse(conversationAfterUser, agents, speaker2Id, userName)
+        const [result1, result2] = await Promise.all([
+          getAgentResponseWithTokens(conversationAfterUser, agents, speaker1Id, userName),
+          getAgentResponseWithTokens(conversationAfterUser, agents, speaker2Id, userName)
         ]);
+        
+        // Track token usage for both agents
+        globalTokenTracker.trackUsage(speaker1.id, speaker1.name, result1.tokenUsage);
+        globalTokenTracker.trackUsage(speaker2.id, speaker2.name, result2.tokenUsage);
         
         const speaker1Message: Message = {
           agentId: speaker1.id,
           agentName: speaker1.name,
-          text: response1,
+          text: result1.response,
           color: speaker1.color,
+          tokenUsage: result1.tokenUsage,
         };
         
         const speaker2Message: Message = {
           agentId: speaker2.id,
           agentName: speaker2.name,
-          text: response2,
+          text: result2.response,
           color: speaker2.color,
+          tokenUsage: result2.tokenUsage,
         };
         
         // Add both messages to conversation
         setConversation(prev => [...prev, speaker1Message, speaker2Message]);
+        
+        // Update token statistics
+        updateTokenStats();
       } else {
         // Single speaker response
         setStatusMessage(`${speaker1.name} is thinking...`);
         
-        const response1 = await getAgentResponse(conversationAfterUser, agents, speaker1Id, userName);
+        const result1 = await getAgentResponseWithTokens(conversationAfterUser, agents, speaker1Id, userName);
+        
+        // Track token usage
+        globalTokenTracker.trackUsage(speaker1.id, speaker1.name, result1.tokenUsage);
         
         const speaker1Message: Message = {
           agentId: speaker1.id,
           agentName: speaker1.name,
-          text: response1,
+          text: result1.response,
           color: speaker1.color,
+          tokenUsage: result1.tokenUsage,
         };
         
         // Add single message to conversation
         setConversation(prev => [...prev, speaker1Message]);
+        
+        // Update token statistics  
+        updateTokenStats();
       }
 
       // Clear mentioned agents after they've been processed
@@ -252,6 +312,26 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
             <button onClick={() => onEndConversation(conversation)} className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 font-bold py-2 px-4 rounded-lg transition-colors">
                 <FileExportIcon /> End & Export
             </button>
+          </div>
+        </div>
+        
+        {/* Token Usage Display */}
+        <TokenUsageDisplay
+          agentStats={tokenStats}
+          totalCost={totalCost}
+          totalTokens={totalTokens}
+          className="compact"
+        />
+        
+        {/* Checkpoint Status Display */}
+        <div className="bg-gray-900 p-3 rounded-lg">
+          <h4 className="text-sm font-bold mb-2 text-yellow-400">⚡ Cost Optimization</h4>
+          <div className="text-xs text-gray-400 space-y-1">
+            <div>ScoreKeeper: Every {CHECKPOINT_CONFIG.scoreKeeperInterval || 'turn'}</div>
+            <div>ReportBot: {CHECKPOINT_CONFIG.reportBotInterval === 0 ? 'End only' : `Every ${CHECKPOINT_CONFIG.reportBotInterval}`}</div>
+            <div className="text-green-400">
+              💰 Reduces API costs by ~{Math.round((1 - 1/Math.max(1, CHECKPOINT_CONFIG.scoreKeeperInterval || 1)) * 100)}%
+            </div>
           </div>
         </div>
         <div>

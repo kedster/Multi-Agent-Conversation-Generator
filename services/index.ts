@@ -39,6 +39,24 @@ async function cloudflareGetAgentResponse(
   if (!agent) {
     throw new Error(`Agent with ID ${agentId} not found.`);
   }
+  
+  // Get the response with token usage and return just the response for backward compatibility
+  const { response } = await cloudflareService.getAgentResponse(agent, conversation, userName, contextSummary);
+  return response;
+}
+
+// New function that returns both response and token usage
+async function cloudflareGetAgentResponseWithTokens(
+  conversation: any[],
+  agents: any[],
+  agentId: string,
+  userName: string,
+  contextSummary?: any
+) {
+  const agent = agents.find((a: any) => a.id === agentId);
+  if (!agent) {
+    throw new Error(`Agent with ID ${agentId} not found.`);
+  }
   return await cloudflareService.getAgentResponse(agent, conversation, userName, contextSummary);
 }
 
@@ -50,6 +68,11 @@ export const getNextSpeaker = isCloudflarePages
 export const getAgentResponse = isCloudflarePages 
   ? cloudflareGetAgentResponse 
   : originalService.getAgentResponse;
+
+// Export the new token-aware function
+export const getAgentResponseWithTokens = isCloudflarePages 
+  ? cloudflareGetAgentResponseWithTokens 
+  : originalService.getAgentResponse; // Fallback to original for now (without token info)
 
 export const generateExportReport = isCloudflarePages 
   ? cloudflareService.generateExportReport 
