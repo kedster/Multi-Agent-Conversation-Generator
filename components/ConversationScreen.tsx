@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { Agent, Message, MonitorScore, Service } from '../types';
-import { getNextSpeaker, getAgentResponse } from '../services';
+import type { Agent, Message, MonitorScore, Service, AgentTokenStats } from '../types';
+import { getNextSpeaker, getAgentResponseWithTokens } from '../services';
 import { UserIcon, SendIcon, FileExportIcon } from './icons';
 import { detectMentionedAgents, shouldAgentSpeak, selectTopSpeakers } from '../utils/conversationUtils';
+import { globalTokenTracker } from '../utils/tokenTracker';
+import TokenUsageDisplay from './TokenUsageDisplay';
 
 interface ConversationScreenProps {
   agents: Agent[];
@@ -27,8 +29,22 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
   );
   const [nextAgentId, setNextAgentId] = useState<string | null>(null);
   const [mentionedAgents, setMentionedAgents] = useState<string[]>([]);
+  const [tokenStats, setTokenStats] = useState<AgentTokenStats[]>([]);
+  const [totalCost, setTotalCost] = useState<number>(0);
+  const [totalTokens, setTotalTokens] = useState<number>(0);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Update token statistics
+  const updateTokenStats = () => {
+    const stats = globalTokenTracker.getAllStats();
+    const totalCostValue = globalTokenTracker.getTotalCost();
+    const totalTokensValue = globalTokenTracker.getTotalTokens();
+    
+    setTokenStats(stats);
+    setTotalCost(totalCostValue);
+    setTotalTokens(totalTokensValue);
+  };
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -86,6 +102,12 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
         cumulativeScores,
         skippedTurns
       );
+
+      // Track ScoreKeeper token usage if available
+      if (monitorDecision.tokenUsage) {
+        globalTokenTracker.trackUsage('scorekeeper', 'ScoreKeeper', monitorDecision.tokenUsage);
+        updateTokenStats();
+      }
 
       if (!monitorDecision || !monitorDecision.scores) {
         throw new Error("Invalid response from monitor agent.");
@@ -145,42 +167,58 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
         setStatusMessage(`${speaker1.name} and ${speaker2.name} are thinking...`);
         
         // Parallel API calls for both agents to maintain separate context
-        const [response1, response2] = await Promise.all([
-          getAgentResponse(conversationAfterUser, agents, speaker1Id, userName),
-          getAgentResponse(conversationAfterUser, agents, speaker2Id, userName)
+        const [result1, result2] = await Promise.all([
+          getAgentResponseWithTokens(conversationAfterUser, agents, speaker1Id, userName),
+          getAgentResponseWithTokens(conversationAfterUser, agents, speaker2Id, userName)
         ]);
+        
+        // Track token usage for both agents
+        globalTokenTracker.trackUsage(speaker1.id, speaker1.name, result1.tokenUsage);
+        globalTokenTracker.trackUsage(speaker2.id, speaker2.name, result2.tokenUsage);
         
         const speaker1Message: Message = {
           agentId: speaker1.id,
           agentName: speaker1.name,
-          text: response1,
+          text: result1.response,
           color: speaker1.color,
+          tokenUsage: result1.tokenUsage,
         };
         
         const speaker2Message: Message = {
           agentId: speaker2.id,
           agentName: speaker2.name,
-          text: response2,
+          text: result2.response,
           color: speaker2.color,
+          tokenUsage: result2.tokenUsage,
         };
         
         // Add both messages to conversation
         setConversation(prev => [...prev, speaker1Message, speaker2Message]);
+        
+        // Update token statistics
+        updateTokenStats();
       } else {
         // Single speaker response
         setStatusMessage(`${speaker1.name} is thinking...`);
         
-        const response1 = await getAgentResponse(conversationAfterUser, agents, speaker1Id, userName);
+        const result1 = await getAgentResponseWithTokens(conversationAfterUser, agents, speaker1Id, userName);
+        
+        // Track token usage
+        globalTokenTracker.trackUsage(speaker1.id, speaker1.name, result1.tokenUsage);
         
         const speaker1Message: Message = {
           agentId: speaker1.id,
           agentName: speaker1.name,
-          text: response1,
+          text: result1.response,
           color: speaker1.color,
+          tokenUsage: result1.tokenUsage,
         };
         
         // Add single message to conversation
         setConversation(prev => [...prev, speaker1Message]);
+        
+        // Update token statistics  
+        updateTokenStats();
       }
 
       // Clear mentioned agents after they've been processed
@@ -254,6 +292,14 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
             </button>
           </div>
         </div>
+        
+        {/* Token Usage Display */}
+        <TokenUsageDisplay
+          agentStats={tokenStats}
+          totalCost={totalCost}
+          totalTokens={totalTokens}
+          className="compact"
+        />
         <div>
             <h3 className="text-lg font-bold mb-3">Status</h3>
             <div className="bg-gray-900 p-3 rounded-lg">

@@ -1,4 +1,4 @@
-import type { Agent, Message, MonitorScore, Service } from '../types';
+import type { Agent, Message, MonitorScore, Service, TokenUsage } from '../types';
 
 // Configuration for API endpoint
 const API_BASE_URL = typeof window !== 'undefined' 
@@ -9,7 +9,8 @@ const API_BASE_URL = typeof window !== 'undefined'
 const model = 'gpt-4o-mini';
 
 // Helper function to make API calls to our Cloudflare Worker
-async function callOpenAI(messages: any[], temperature: number = 0.8, maxTokens: number = 500, responseFormat?: any) {
+// Returns both the response and token usage information
+async function callOpenAI(messages: any[], temperature: number = 0.8, maxTokens: number = 500, responseFormat?: any): Promise<{response: any, tokenUsage: TokenUsage}> {
   const body: any = {
     model,
     messages,
@@ -39,7 +40,19 @@ async function callOpenAI(messages: any[], temperature: number = 0.8, maxTokens:
     throw new Error(errorData.error || `OpenAI API request failed with status ${response.status}`);
   }
 
-  return response.json();
+  const jsonResponse = await response.json();
+  
+  // Extract token usage from the API response
+  const tokenUsage: TokenUsage = {
+    prompt_tokens: jsonResponse.usage?.prompt_tokens || 0,
+    completion_tokens: jsonResponse.usage?.completion_tokens || 0,
+    total_tokens: jsonResponse.usage?.total_tokens || 0,
+  };
+
+  return {
+    response: jsonResponse,
+    tokenUsage
+  };
 }
 
 function formatConversationHistory(conversation: Message[], userName: string): string {
@@ -123,6 +136,7 @@ interface MonitorDecision {
     scores: MonitorScore[];
     reasoning: string;
     nextSpeakerAgentId: string;
+    tokenUsage?: TokenUsage;
 }
 
 interface ContextSummary {
@@ -151,7 +165,7 @@ Generate a JSON response with:
 Respond in JSON format only.`;
 
     try {
-        const response = await callOpenAI([
+        const { response, tokenUsage } = await callOpenAI([
             {
                 role: "system",
                 content: "You are a conversation analyst. Always respond with valid JSON."
@@ -270,7 +284,7 @@ Focus on RELEVANCE TO THE USER'S CURRENT MESSAGE above all other factors.
 Select the agent with the highest combined score as the primary recommended speaker.`;
 
     try {
-        const response = await callOpenAI([
+        const { response, tokenUsage } = await callOpenAI([
             {
                 role: "system",
                 content: "You are an expert conversation analyst and scorekeeper. Always provide detailed, varied scoring based on actual context relevance. Respond with valid JSON according to the schema."
@@ -297,6 +311,9 @@ Select the agent with the highest combined score as the primary recommended spea
         if (!decision.scores || !Array.isArray(decision.scores) || !decision.nextSpeakerAgentId || !decision.reasoning) {
             throw new Error("Invalid scorekeeper response structure");
         }
+        
+        // Add token usage to the decision
+        decision.tokenUsage = tokenUsage;
         
         return decision;
     } catch (error) {
@@ -408,7 +425,7 @@ export const getAgentResponse = async (
     conversation: Message[], 
     userName: string,
     contextSummary?: ContextSummary
-): Promise<string> => {
+): Promise<{response: string, tokenUsage: TokenUsage}> => {
     const conversationHistory = formatConversationHistory(conversation, userName);
     
     // Generate context summary if not provided
@@ -459,7 +476,7 @@ It is now your turn to speak. As ${agent.name}, continue the conversation natura
 `;
 
     try {
-        const response = await callOpenAI([
+        const { response, tokenUsage } = await callOpenAI([
             {
                 role: "system",
                 content: `You are role-playing as ${agent.name}. ${agent.role}
@@ -477,7 +494,10 @@ PERSONALITY TRAITS: You are direct, argumentative when necessary, and protective
             throw new Error("No response content received from OpenAI");
         }
         
-        return content.trim();
+        return {
+            response: content.trim(),
+            tokenUsage
+        };
     } catch (error) {
         console.error(`Error getting response for agent ${agent.name}:`, error);
         throw new Error(`Agent ${agent.name} failed to generate a response.`);

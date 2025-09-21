@@ -17,12 +17,19 @@ export interface Service {
   agents: Agent[];
 }
 
+export interface TokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
 export interface Message {
   agentId: string;
   agentName: string;
   text: string;
   color: string;
   isUser?: boolean;
+  tokenUsage?: TokenUsage;
 }
 
 export interface MonitorScore {
@@ -39,6 +46,14 @@ export interface AgentScore {
   responseScore: number;
   totalScore: number;
   contextRelevance: number;
+}
+
+export interface AgentTokenStats {
+  agentId: string;
+  agentName: string;
+  totalTokens: number;
+  totalCost: number;
+  callCount: number;
 }
 
 export interface ConversationContext {
