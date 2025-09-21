@@ -55,10 +55,12 @@ An advanced React application that creates realistic conversations between multi
    ```bash
    cp .env.local.example .env.local
    ```
-   Then edit `.env.local` and add your OpenAI API key:
+   Then edit `.env.local` and replace `your_openai_api_key_here` with your actual OpenAI API key:
    ```
-   VITE_OPENAI_API_KEY=your_openai_api_key_here
+   VITE_OPENAI_API_KEY=sk-your-actual-openai-api-key-here
    ```
+   
+   💡 **Tip**: Your API key should start with `sk-` and can be found at [OpenAI Platform](https://platform.openai.com/account/api-keys)
 
 4. **Start the development server**
    ```bash
