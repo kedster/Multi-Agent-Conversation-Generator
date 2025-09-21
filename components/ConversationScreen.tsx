@@ -4,6 +4,8 @@ import { getNextSpeaker, getAgentResponseWithTokens } from '../services';
 import { UserIcon, SendIcon, FileExportIcon } from './icons';
 import { detectMentionedAgents, shouldAgentSpeak, selectTopSpeakers } from '../utils/conversationUtils';
 import { globalTokenTracker } from '../utils/tokenTracker';
+import { globalCheckpointManager, CHECKPOINT_CONFIG } from '../utils/checkpointManager';
+import { generateFallbackScores } from '../utils/fallbackScoring';
 import TokenUsageDisplay from './TokenUsageDisplay';
 
 interface ConversationScreenProps {
@@ -52,6 +54,11 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
     }
   }, [conversation]);
 
+  // Reset checkpoint manager when conversation is reset
+  useEffect(() => {
+    globalCheckpointManager.reset();
+  }, [initialConversation]);
+
   // Function to calculate total score for an agent
   const calculateTotalScore = (agentId: string, currentScores: MonitorScore[], cumulativeScores: Record<string, MonitorScore>) => {
     const currentScore = currentScores.find(s => s.agentId === agentId);
@@ -92,21 +99,36 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
         .slice(-2)
         .map(msg => msg.agentId);
 
-      // 1. Monitor analyzes conversation and scores all agents
-      setStatusMessage('Monitor is analyzing conversation context...');
-      const monitorDecision = await getNextSpeaker(
-        conversationAfterUser, 
-        agents, 
-        userName, 
-        undefined, // agentToExcludeId - not used in our new system
-        cumulativeScores,
-        skippedTurns
-      );
+      // 1. Check if we should use ScoreKeeper (checkpoint-based) or fallback scoring
+      const shouldUseScoreKeeper = globalCheckpointManager.shouldCallScoreKeeper(conversationAfterUser, false);
+      let monitorDecision;
+      
+      if (shouldUseScoreKeeper) {
+        // Use ScoreKeeper at checkpoints
+        setStatusMessage('Monitor is analyzing conversation context...');
+        monitorDecision = await getNextSpeaker(
+          conversationAfterUser, 
+          agents, 
+          userName, 
+          undefined, // agentToExcludeId - not used in our new system
+          cumulativeScores,
+          skippedTurns
+        );
 
-      // Track ScoreKeeper token usage if available
-      if (monitorDecision.tokenUsage) {
-        globalTokenTracker.trackUsage('scorekeeper', 'ScoreKeeper', monitorDecision.tokenUsage);
-        updateTokenStats();
+        // Track ScoreKeeper token usage if available
+        if (monitorDecision.tokenUsage) {
+          globalTokenTracker.trackUsage('scorekeeper', 'ScoreKeeper', monitorDecision.tokenUsage);
+          updateTokenStats();
+        }
+      } else {
+        // Use fallback scoring for cost efficiency
+        setStatusMessage('Using cached scoring for efficiency...');
+        const fallbackResult = generateFallbackScores(conversationAfterUser, agents, userName, cumulativeScores);
+        monitorDecision = {
+          scores: fallbackResult.scores,
+          reasoning: fallbackResult.reasoning,
+          nextSpeakerAgentId: fallbackResult.nextSpeakerAgentId
+        };
       }
 
       if (!monitorDecision || !monitorDecision.scores) {
@@ -300,6 +322,18 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
           totalTokens={totalTokens}
           className="compact"
         />
+        
+        {/* Checkpoint Status Display */}
+        <div className="bg-gray-900 p-3 rounded-lg">
+          <h4 className="text-sm font-bold mb-2 text-yellow-400">⚡ Cost Optimization</h4>
+          <div className="text-xs text-gray-400 space-y-1">
+            <div>ScoreKeeper: Every {CHECKPOINT_CONFIG.scoreKeeperInterval || 'turn'}</div>
+            <div>ReportBot: {CHECKPOINT_CONFIG.reportBotInterval === 0 ? 'End only' : `Every ${CHECKPOINT_CONFIG.reportBotInterval}`}</div>
+            <div className="text-green-400">
+              💰 Reduces API costs by ~{Math.round((1 - 1/Math.max(1, CHECKPOINT_CONFIG.scoreKeeperInterval || 1)) * 100)}%
+            </div>
+          </div>
+        </div>
         <div>
             <h3 className="text-lg font-bold mb-3">Status</h3>
             <div className="bg-gray-900 p-3 rounded-lg">
