@@ -1,4 +1,6 @@
 
+import React from 'react';
+
 export interface Agent {
   id: string;
   name: string;
@@ -44,6 +46,14 @@ export interface ConversationContext {
   keyPoints: string[];
   lastSpeaker?: string;
   userIntent: string;
+}
+
+export interface AgentConfiguration {
+  id: string;
+  name: string;
+  agents: Agent[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export enum Screen {
