@@ -1,5 +1,23 @@
 {
   "name": "Multi-Agent Conversation Generator",
-  "description": "An application that simulates conversations between multiple AI agents on a selected topic, allowing user interaction and exporting the final transcript as HTML or PDF.",
+  "description": "Interactive React application that simulates realistic conversations between multiple AI agents on various topics with user participation and professional report export capabilities",
+  "keywords": [
+    "ai",
+    "artificial-intelligence",
+    "conversation-simulation",
+    "multi-agent-system",
+    "chatbot",
+    "openai",
+    "gpt-4",
+    "react",
+    "typescript",
+    "dialogue-generation",
+    "interactive-ai",
+    "conversation-generator",
+    "team-planning",
+    "creative-writing",
+    "brainstorming",
+    "educational-simulation"
+  ],
   "requestFramePermissions": []
 }
