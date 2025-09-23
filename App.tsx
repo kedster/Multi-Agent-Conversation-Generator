@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import type { Agent, Service, Message } from './types';
 import { Screen } from './types';
 import { DEFAULT_SERVICES } from './constants';
+import Header from './components/Header';
+import Footer from './components/Footer';
 import HomeScreen from './components/HomeScreen';
 import SetupScreen from './components/SetupScreen';
 import ConversationScreen from './components/ConversationScreen';
@@ -132,11 +134,13 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 font-sans">
-      <main className="container mx-auto p-4 md:p-8">
+    <div className="min-h-screen bg-gray-900 text-gray-100 font-sans flex flex-col">
+      <Header currentScreen={currentScreen} onNavigate={handleNavigate} />
+      <main className="flex-1 container mx-auto p-4 md:p-8">
           <Breadcrumbs currentScreen={currentScreen} onNavigate={handleNavigate} />
           {renderScreen()}
       </main>
+      <Footer />
     </div>
   );
 };
