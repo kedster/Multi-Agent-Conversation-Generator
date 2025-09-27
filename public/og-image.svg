@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1f2937;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#111827;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="titleGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bgGrad)"/>
+  
+  <!-- Title -->
+  <text x="600" y="200" text-anchor="middle" fill="url(#titleGrad)" font-family="Arial, sans-serif" font-size="60" font-weight="bold">
+    Multi-Agent Conversation Generator
+  </text>
+  
+  <!-- Subtitle -->
+  <text x="600" y="260" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="28">
+    AI Team Simulation Tool
+  </text>
+  
+  <!-- Description -->
+  <text x="600" y="320" text-anchor="middle" fill="#d1d5db" font-family="Arial, sans-serif" font-size="20">
+    Simulate realistic conversations between multiple AI agents
+  </text>
+  <text x="600" y="350" text-anchor="middle" fill="#d1d5db" font-family="Arial, sans-serif" font-size="20">
+    Perfect for team planning, creative writing, and educational simulations
+  </text>
+  
+  <!-- Agent conversation bubbles -->
+  <!-- Main bubble -->
+  <ellipse cx="300" cy="450" rx="80" ry="50" fill="#ffffff" opacity="0.1"/>
+  <path d="M250 500 L220 530 L280 500 Z" fill="#ffffff" opacity="0.1"/>
+  
+  <!-- Second bubble -->
+  <ellipse cx="600" cy="420" rx="70" ry="40" fill="#ffffff" opacity="0.15"/>
+  <path d="M650 460 L680 485 L620 460 Z" fill="#ffffff" opacity="0.15"/>
+  
+  <!-- Third bubble -->
+  <ellipse cx="900" cy="470" rx="75" ry="45" fill="#ffffff" opacity="0.1"/>
+  <path d="M950 515 L980 540 L920 515 Z" fill="#ffffff" opacity="0.1"/>
+  
+  <!-- Agent dots -->
+  <circle cx="280" cy="450" r="6" fill="#3b82f6"/>
+  <circle cx="320" cy="450" r="6" fill="#10b981"/>
+  <circle cx="580" cy="420" r="6" fill="#f97316"/>
+  <circle cx="620" cy="420" r="6" fill="#8b5cf6"/>
+  <circle cx="880" cy="470" r="6" fill="#ef4444"/>
+  <circle cx="920" cy="470" r="6" fill="#06b6d4"/>
+  
+  <!-- Website URL -->
+  <text x="600" y="580" text-anchor="middle" fill="#9ca3af" font-family="Arial, sans-serif" font-size="18">
+    multi-agent-conversation-generator.pages.dev
+  </text>
+</svg>

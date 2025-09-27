@@ -1,0 +1,24 @@
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: https://multi-agent-conversation-generator.pages.dev/sitemap.xml
+
+# Crawl-delay for polite crawling
+Crawl-delay: 1
+
+# Block access to API endpoints and functions
+Disallow: /api/
+Disallow: /functions/
+Disallow: /_worker.js
+Disallow: /assets/*.map
+
+# Allow all images and assets
+Allow: /assets/
+Allow: /*.png
+Allow: /*.jpg
+Allow: /*.jpeg
+Allow: /*.gif
+Allow: /*.svg
+Allow: /*.webp
+Allow: /*.ico
