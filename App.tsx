@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { Agent, Service, Message } from './types';
 import { Screen } from './types';
 import { DEFAULT_SERVICES } from './constants';
+import { useSEO } from './utils/useSEO';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import HomeScreen from './components/HomeScreen';
@@ -59,6 +60,9 @@ const App: React.FC = () => {
   const [agents, setAgents] = useState<Agent[]>(DEFAULT_SERVICES[0].agents);
   const [conversation, setConversation] = useState<Message[]>([]);
   const [userName, setUserName] = useState<string>('You');
+
+  // Update SEO dynamically based on current screen and service
+  useSEO(currentScreen, selectedService);
 
 
   const handleSelectService = (service: Service) => {
