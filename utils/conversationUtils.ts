@@ -72,6 +72,7 @@ export const detectMentionedAgents = (userMessage: string, agents: Agent[]): str
 
 /**
  * Determines if an agent should be allowed to speak based on relevance threshold
+ * @deprecated Use scoreManagement.shouldAgentSpeak for new code
  */
 export const shouldAgentSpeak = (relevance: number, minRelevanceThreshold: number = 4): boolean => {
   return relevance >= minRelevanceThreshold;
@@ -80,6 +81,7 @@ export const shouldAgentSpeak = (relevance: number, minRelevanceThreshold: numbe
 /**
  * Determines the speakers with highest relevance (1-2 speakers based on relevance)
  * This function encapsulates the core turn distribution algorithm
+ * @deprecated Use ConversationModerator.selectSpeakers for new code - kept for backward compatibility
  */
 export const selectTopSpeakers = (
   scores: MonitorScore[], 

@@ -1,6 +1,10 @@
 import type { Agent, Message, MonitorScore } from '../types';
+import { ConversationModerator } from './conversationModerator';
 
-// Fallback scoring when not using ScoreKeeper at checkpoint
+/**
+ * Fallback scoring when not using ScoreKeeper at checkpoint.
+ * Now uses the main conversation moderation algorithm for consistency.
+ */
 export function generateFallbackScores(
   conversation: Message[], 
   agents: Agent[], 
@@ -9,9 +13,43 @@ export function generateFallbackScores(
 ): {scores: MonitorScore[], nextSpeakerAgentId: string, reasoning: string} {
   
   const userMessage = conversation.filter(msg => msg.isUser).pop()?.text || "";
+  
+  // Generate keyword-based scores using the existing logic
+  const scores = generateKeywordBasedScores(userMessage, agents, conversation);
+  
+  // Create a temporary moderator with current state for consistent speaker selection
+  const moderator = new ConversationModerator(agents);
+  moderator.setState(cumulativeScores, generateSkippedTurnsFromConversation(conversation, agents));
+  
+  // Use the main algorithm for speaker selection
+  const { speaker1Id } = moderator.selectSpeakers(scores, conversation, userMessage);
+  
+  const nextSpeaker = agents.find(a => a.id === speaker1Id);
+  
+  // Sort for reasoning display
+  const sortedAgents = [...scores].sort((a, b) => 
+    (b.relevance + b.context) - (a.relevance + a.context)
+  );
+  
+  const reasoning = `Fallback scoring: Selected ${nextSpeaker?.name || 'agent'} using keyword relevance and conversation flow analysis. ` +
+                  `Top scores: ${sortedAgents.slice(0, 2).map(s => 
+                    `${agents.find(a => a.id === s.agentId)?.name}: ${s.relevance + s.context}`
+                  ).join(', ')}`;
+
+  return {
+    scores,
+    nextSpeakerAgentId: speaker1Id,
+    reasoning
+  };
+}
+
+/**
+ * Generate keyword-based scores for fallback mode
+ */
+function generateKeywordBasedScores(userMessage: string, agents: Agent[], conversation: Message[]): MonitorScore[] {
   const userMessageLower = userMessage.toLowerCase();
   
-  const scores = agents.map((agent) => {
+  return agents.map((agent) => {
     // Start with base relevance score
     let relevanceScore = 4;
     let contextScore = 3;
@@ -82,23 +120,26 @@ export function generateFallbackScores(
       context: contextScore
     };
   });
-  
-  // Select the agent with the highest combined score as next speaker
-  const sortedAgents = [...scores].sort((a, b) => 
-    (b.relevance + b.context) - (a.relevance + a.context)
-  );
-  
-  const nextSpeakerAgentId = sortedAgents[0].agentId;
-  const nextSpeaker = agents.find(a => a.id === nextSpeakerAgentId);
-  
-  const reasoning = `Fallback scoring: Selected ${nextSpeaker?.name || 'agent'} based on keyword relevance and conversation flow. ` +
-                  `Top scores: ${sortedAgents.slice(0, 2).map(s => 
-                    `${agents.find(a => a.id === s.agentId)?.name}: ${s.relevance + s.context}`
-                  ).join(', ')}`;
+}
 
-  return {
-    scores,
-    nextSpeakerAgentId,
-    reasoning
-  };
+/**
+ * Generate skipped turns approximation from conversation history
+ */
+function generateSkippedTurnsFromConversation(conversation: Message[], agents: Agent[]): Record<string, number> {
+  const skippedTurns: Record<string, number> = {};
+  agents.forEach(agent => { skippedTurns[agent.id] = 0; });
+  
+  // Simple heuristic: count consecutive non-participation
+  const recentSpeakers = conversation
+    .filter(msg => !msg.isUser)
+    .slice(-4) // Look at last 4 agent messages
+    .map(msg => msg.agentId);
+    
+  agents.forEach(agent => {
+    if (!recentSpeakers.includes(agent.id)) {
+      skippedTurns[agent.id] = Math.min(2, recentSpeakers.length); // Cap at 2 for forced speaking
+    }
+  });
+  
+  return skippedTurns;
 }
