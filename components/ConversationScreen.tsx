@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { Agent, Message, MonitorScore, Service, AgentTokenStats } from '../types';
 import { getNextSpeaker, getAgentResponseWithTokens } from '../services';
 import { UserIcon, SendIcon, FileExportIcon } from './icons';
-import { detectMentionedAgents, shouldAgentSpeak, selectTopSpeakers } from '../utils/conversationUtils';
+import { ConversationModerator } from '../utils/conversationModerator';
+import { calculateTotalScore } from '../utils/scoreManagement';
 import { globalTokenTracker } from '../utils/tokenTracker';
 import { globalCheckpointManager, CHECKPOINT_CONFIG } from '../utils/checkpointManager';
 import { generateFallbackScores } from '../utils/fallbackScoring';
@@ -21,14 +22,16 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
   const [userInput, setUserInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('Your turn. Start the conversation!');
-  const [cumulativeScores, setCumulativeScores] = useState<Record<string, MonitorScore>>(() =>
-    Object.fromEntries(
-      agents.map(agent => [agent.id, { agentId: agent.id, relevance: 0, context: 0 }])
-    )
+  
+  // Create conversation moderator instance
+  const [conversationModerator] = useState(() => new ConversationModerator(agents));
+  const [cumulativeScores, setCumulativeScores] = useState<Record<string, MonitorScore>>(() => 
+    conversationModerator.getState().cumulativeScores
   );
   const [skippedTurns, setSkippedTurns] = useState<Record<string, number>>(() =>
-    Object.fromEntries(agents.map(a => [a.id, 0]))
+    conversationModerator.getState().skippedTurns
   );
+  
   const [nextAgentId, setNextAgentId] = useState<string | null>(null);
   const [mentionedAgents, setMentionedAgents] = useState<string[]>([]);
   const [tokenStats, setTokenStats] = useState<AgentTokenStats[]>([]);
@@ -57,18 +60,11 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
   // Reset checkpoint manager when conversation is reset
   useEffect(() => {
     globalCheckpointManager.reset();
-  }, [initialConversation]);
-
-  // Function to calculate total score for an agent
-  const calculateTotalScore = (agentId: string, currentScores: MonitorScore[], cumulativeScores: Record<string, MonitorScore>) => {
-    const currentScore = currentScores.find(s => s.agentId === agentId);
-    const cumulative = cumulativeScores[agentId] || { agentId, relevance: 0, context: 0 };
-    
-    if (!currentScore) return 0;
-    
-    // Total score = (cumulative relevance + context) + (current relevance + context)
-    return (cumulative.relevance + cumulative.context) + (currentScore.relevance + currentScore.context);
-  };
+    // Also reset the conversation moderator
+    conversationModerator.reset();
+    setCumulativeScores(conversationModerator.getState().cumulativeScores);
+    setSkippedTurns(conversationModerator.getState().skippedTurns);
+  }, [initialConversation, conversationModerator]);
 
   const handleUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,20 +81,10 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
     const conversationAfterUser = [...conversation, userMessage];
     setConversation(conversationAfterUser);
     
-    // Detect if user mentioned any specific agents
-    const newMentionedAgents = detectMentionedAgents(userInput, agents);
-    setMentionedAgents(newMentionedAgents);
-    
     setUserInput('');
     setIsLoading(true);
 
     try {
-      // Get the last 2 speakers to prevent succession
-      const lastSpeakers = conversationAfterUser
-        .filter(msg => !msg.isUser)
-        .slice(-2)
-        .map(msg => msg.agentId);
-
       // 1. Check if we should use ScoreKeeper (checkpoint-based) or fallback scoring
       const shouldUseScoreKeeper = globalCheckpointManager.shouldCallScoreKeeper(conversationAfterUser, false);
       let monitorDecision;
@@ -121,7 +107,7 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
           updateTokenStats();
         }
       } else {
-        // Use fallback scoring for cost efficiency
+        // Use fallback scoring for cost efficiency - now using the main algorithm
         setStatusMessage('Using cached scoring for efficiency...');
         const fallbackResult = generateFallbackScores(conversationAfterUser, agents, userName, cumulativeScores);
         monitorDecision = {
@@ -137,61 +123,35 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
 
       const turnScores = monitorDecision.scores;
 
-      // 2. Determine the speakers with highest relevance (1-2 speakers)
-      const [speaker1Id, speaker2Id] = selectTopSpeakers(
+      // 2. Use ConversationModerator to process the turn (centralized logic)
+      const moderationResult = conversationModerator.processTurn(
         turnScores,
-        agents,
-        cumulativeScores,
-        skippedTurns,
-        lastSpeakers,
-        newMentionedAgents
+        conversationAfterUser,
+        userInput
       );
 
-      const speaker1 = agents.find(a => a.id === speaker1Id);
-      const speaker2 = speaker2Id ? agents.find(a => a.id === speaker2Id) : null;
+      const speaker1 = agents.find(a => a.id === moderationResult.speaker1Id);
+      const speaker2 = moderationResult.speaker2Id ? agents.find(a => a.id === moderationResult.speaker2Id) : null;
       
       if (!speaker1) {
         throw new Error("Could not determine primary speaker.");
       }
 
-      // 3. Update cumulative scores
-      setCumulativeScores(prevScores => {
-        const newScores = { ...prevScores };
-        turnScores.forEach(score => {
-          if (newScores[score.agentId]) {
-            newScores[score.agentId] = {
-              agentId: score.agentId,
-              relevance: newScores[score.agentId].relevance + score.relevance,
-              context: newScores[score.agentId].context + score.context,
-            };
-          }
-        });
-        return newScores;
-      });
+      // 3. Update state with moderator results
+      setCumulativeScores(moderationResult.cumulativeScores);
+      setSkippedTurns(moderationResult.skippedTurns);
+      setMentionedAgents(moderationResult.mentionedAgents);
 
-      // 4. Update skipped turns
-      setSkippedTurns(prevSkipped => {
-        const newSkipped = { ...prevSkipped };
-        agents.forEach(agent => {
-          if (agent.id === speaker1Id || agent.id === speaker2Id) {
-            newSkipped[agent.id] = 0; // Reset for speakers
-          } else {
-            newSkipped[agent.id]++; // Increment for others
-          }
-        });
-        return newSkipped;
-      });
-
-      // 5. Generate responses (single or dual based on selection)
-      setNextAgentId(speaker1Id);
+      // 4. Generate responses (single or dual based on selection)
+      setNextAgentId(moderationResult.speaker1Id);
       
       if (speaker2) {
         setStatusMessage(`${speaker1.name} and ${speaker2.name} are thinking...`);
         
         // Parallel API calls for both agents to maintain separate context
         const [result1, result2] = await Promise.all([
-          getAgentResponseWithTokens(conversationAfterUser, agents, speaker1Id, userName),
-          getAgentResponseWithTokens(conversationAfterUser, agents, speaker2Id, userName)
+          getAgentResponseWithTokens(conversationAfterUser, agents, speaker1.id, userName),
+          getAgentResponseWithTokens(conversationAfterUser, agents, speaker2.id, userName)
         ]);
         
         // Track token usage for both agents
@@ -223,7 +183,7 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
         // Single speaker response
         setStatusMessage(`${speaker1.name} is thinking...`);
         
-        const result1 = await getAgentResponseWithTokens(conversationAfterUser, agents, speaker1Id, userName);
+        const result1 = await getAgentResponseWithTokens(conversationAfterUser, agents, speaker1.id, userName);
         
         // Track token usage
         globalTokenTracker.trackUsage(speaker1.id, speaker1.name, result1.tokenUsage);
@@ -242,9 +202,6 @@ const ConversationScreen: React.FC<ConversationScreenProps> = ({ agents, initial
         // Update token statistics  
         updateTokenStats();
       }
-
-      // Clear mentioned agents after they've been processed
-      setMentionedAgents([]);
 
     } catch (error) {
       const errorMessage: Message = {
